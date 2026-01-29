@@ -7,7 +7,7 @@ namespace ScreenTranslator.Services;
 public sealed class HotkeyService : IDisposable
 {
   private const int WM_HOTKEY = 0x0312;
-  private const int HOTKEY_ID = 0xBEEF;
+  public const int DefaultHotkeyId = 0xBEEF;
 
   private const uint MOD_ALT = 0x0001;
   private const uint MOD_CONTROL = 0x0002;
@@ -16,7 +16,9 @@ public sealed class HotkeyService : IDisposable
   private const uint MOD_NOREPEAT = 0x4000;
 
   public event EventHandler? HotkeyPressed;
-  private bool _registered;
+  public event EventHandler<int>? HotkeyPressedById;
+
+  private readonly HashSet<int> _registeredIds = new();
 
   public HotkeyService()
   {
@@ -25,45 +27,67 @@ public sealed class HotkeyService : IDisposable
 
   public void RegisterDefaultHotkey()
   {
-    RegisterHotkey("Ctrl+Alt+T");
+    RegisterHotkey("Ctrl+Alt+T", DefaultHotkeyId);
   }
 
   public void RegisterHotkey(string? hotkey)
+  {
+    RegisterHotkey(hotkey, DefaultHotkeyId);
+  }
+
+  public void RegisterHotkey(string? hotkey, int id)
   {
     var value = string.IsNullOrWhiteSpace(hotkey) ? "Ctrl+Alt+T" : hotkey.Trim();
     if (!TryParseHotkey(value, out var mods, out var vk, out var error))
       throw new InvalidOperationException(error);
 
-    Unregister();
+    Unregister(id);
 
-    if (!RegisterHotKey(IntPtr.Zero, HOTKEY_ID, mods | MOD_NOREPEAT, vk))
+    if (!RegisterHotKey(IntPtr.Zero, id, mods | MOD_NOREPEAT, vk))
       throw new InvalidOperationException($"Failed to register hotkey ({value}). It may already be in use.");
 
-    _registered = true;
+    _registeredIds.Add(id);
   }
 
   private void OnThreadPreprocessMessage(ref MSG msg, ref bool handled)
   {
-    if (msg.message == WM_HOTKEY && msg.wParam.ToInt32() == HOTKEY_ID)
+    if (msg.message == WM_HOTKEY)
     {
-      handled = true;
-      HotkeyPressed?.Invoke(this, EventArgs.Empty);
+      var id = msg.wParam.ToInt32();
+      if (_registeredIds.Contains(id))
+      {
+        handled = true;
+        HotkeyPressedById?.Invoke(this, id);
+        if (id == DefaultHotkeyId)
+          HotkeyPressed?.Invoke(this, EventArgs.Empty);
+      }
     }
   }
 
   public void Dispose()
   {
-    Unregister();
+    UnregisterAll();
     ComponentDispatcher.ThreadPreprocessMessage -= OnThreadPreprocessMessage;
   }
 
-  private void Unregister()
+  public void UnregisterAll()
   {
-    if (!_registered)
+    if (_registeredIds.Count == 0)
       return;
 
-    try { UnregisterHotKey(IntPtr.Zero, HOTKEY_ID); } catch { }
-    _registered = false;
+    foreach (var id in _registeredIds.ToArray())
+    {
+      Unregister(id);
+    }
+  }
+
+  public void Unregister(int id)
+  {
+    if (!_registeredIds.Contains(id))
+      return;
+
+    try { UnregisterHotKey(IntPtr.Zero, id); } catch { }
+    _registeredIds.Remove(id);
   }
 
   private static bool TryParseHotkey(string hotkey, out uint mods, out uint vk, out string error)

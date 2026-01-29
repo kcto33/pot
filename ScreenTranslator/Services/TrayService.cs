@@ -13,6 +13,7 @@ public sealed class TrayService : IDisposable
   private bool _trayIconOwned;
 
   public event EventHandler? StartSelectionRequested;
+  public event EventHandler? ShowPasteHistoryRequested;
   public event EventHandler? ShowSettingsRequested;
   public event EventHandler? ToggleAutoStartRequested;
   public event EventHandler? ExitRequested;
@@ -41,10 +42,15 @@ public sealed class TrayService : IDisposable
 
     var start = new ToolStripMenuItem("Start Selection")
     {
-      ShortcutKeys = Keys.Control | Keys.Alt | Keys.T,
-      ShowShortcutKeys = true,
+      ShowShortcutKeys = false,
     };
     start.Click += (_, _) => StartSelectionRequested?.Invoke(this, EventArgs.Empty);
+
+    var pasteHistory = new ToolStripMenuItem("历史粘贴")
+    {
+      ShowShortcutKeys = false,
+    };
+    pasteHistory.Click += (_, _) => ShowPasteHistoryRequested?.Invoke(this, EventArgs.Empty);
 
     var settings = new ToolStripMenuItem("Settings");
     settings.Click += (_, _) => ShowSettingsRequested?.Invoke(this, EventArgs.Empty);
@@ -55,12 +61,24 @@ public sealed class TrayService : IDisposable
       CheckOnClick = false,
     };
     autoStart.Click += (_, _) => ToggleAutoStartRequested?.Invoke(this, EventArgs.Empty);
-    menu.Opening += (_, _) => autoStart.Checked = _autoStart.IsEnabled();
+    menu.Opening += (_, _) =>
+    {
+      autoStart.Checked = _autoStart.IsEnabled();
+
+      var startHotkey = string.IsNullOrWhiteSpace(_settings.Settings.Hotkey) ? "Ctrl+Alt+T" : _settings.Settings.Hotkey.Trim();
+      start.Text = $"Start Selection\t{startHotkey}";
+
+      var pasteHotkey = string.IsNullOrWhiteSpace(_settings.Settings.PasteHistoryHotkey)
+        ? "Ctrl+Shift+V"
+        : _settings.Settings.PasteHistoryHotkey.Trim();
+      pasteHistory.Text = $"历史粘贴\t{pasteHotkey}";
+    };
 
     var exit = new ToolStripMenuItem("Exit");
     exit.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
 
     menu.Items.Add(start);
+    menu.Items.Add(pasteHistory);
     menu.Items.Add(new ToolStripSeparator());
     menu.Items.Add(settings);
     menu.Items.Add(autoStart);
@@ -111,18 +129,29 @@ public sealed class TrayService : IDisposable
     if (_trayIcon is not null)
       return _trayIcon;
 
-    var assetIcon = Path.Combine(AppContext.BaseDirectory, "Assets", "tray.ico");
-    if (File.Exists(assetIcon))
+    // Try multiple possible locations for the icon
+    var possiblePaths = new[]
     {
-      try
+      Path.Combine(AppContext.BaseDirectory, "Assets", "tray.ico"),
+      Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "tray.ico"),
+      Path.Combine(Environment.CurrentDirectory, "Assets", "tray.ico"),
+      Path.Combine(Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "", "Assets", "tray.ico"),
+    };
+
+    foreach (var assetIcon in possiblePaths)
+    {
+      if (File.Exists(assetIcon))
       {
-        _trayIcon = new System.Drawing.Icon(assetIcon);
-        _trayIconOwned = true;
-        return _trayIcon;
-      }
-      catch
-      {
-        // ignore and fall back
+        try
+        {
+          _trayIcon = new System.Drawing.Icon(assetIcon);
+          _trayIconOwned = true;
+          return _trayIcon;
+        }
+        catch
+        {
+          // ignore and try next
+        }
       }
     }
 
