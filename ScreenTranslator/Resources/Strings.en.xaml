@@ -7,6 +7,7 @@
   <sys:String x:Key="TrayMenu_StartSelection">Start Selection</sys:String>
   <sys:String x:Key="TrayMenu_PasteHistory">Paste History</sys:String>
   <sys:String x:Key="TrayMenu_Screenshot">Screenshot</sys:String>
+  <sys:String x:Key="TrayMenu_DisableHotkeys">Disable Hotkeys</sys:String>
   <sys:String x:Key="TrayMenu_Settings">Settings</sys:String>
   <sys:String x:Key="TrayMenu_StartWithWindows">Start with Windows</sys:String>
   <sys:String x:Key="TrayMenu_Exit">Exit</sys:String>

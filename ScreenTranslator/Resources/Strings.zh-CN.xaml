@@ -7,6 +7,7 @@
   <sys:String x:Key="TrayMenu_StartSelection">开始翻译</sys:String>
   <sys:String x:Key="TrayMenu_PasteHistory">历史粘贴</sys:String>
   <sys:String x:Key="TrayMenu_Screenshot">截图贴图</sys:String>
+  <sys:String x:Key="TrayMenu_DisableHotkeys">屏蔽热键</sys:String>
   <sys:String x:Key="TrayMenu_Settings">设置</sys:String>
   <sys:String x:Key="TrayMenu_StartWithWindows">开机启动</sys:String>
   <sys:String x:Key="TrayMenu_Exit">退出</sys:String>
