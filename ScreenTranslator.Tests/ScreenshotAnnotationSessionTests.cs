@@ -54,7 +54,7 @@ public sealed class ScreenshotAnnotationSessionTests
   }
 
   [Fact]
-  public void CommitStroke_Filters_Points_Outside_Freeform_Edit_Mask()
+  public void CommitStroke_Preserves_Separate_Segments_Across_Masked_Gaps()
   {
     var session = new ScreenshotAnnotationSession(
       new Size(100, 100),
@@ -62,11 +62,34 @@ public sealed class ScreenshotAnnotationSessionTests
 
     session.SetActiveTool(ScreenshotAnnotationTool.Brush);
     session.CommitStroke(
-      [new Point(5, 5), new Point(45, 45), new Point(50, 50), new Point(95, 95)],
+      [new Point(45, 45), new Point(50, 50), new Point(5, 5), new Point(52, 52), new Point(55, 55)],
       Colors.Red,
       strokeThickness: 6);
 
     var operation = Assert.IsType<BrushStrokeAnnotationOperation>(Assert.Single(session.Operations));
-    Assert.All(operation.Points, point => Assert.True(session.EditMask.FillContains(point)));
+    Assert.Equal(2, operation.Segments.Count);
+    Assert.All(operation.Segments, segment => Assert.All(segment, point => Assert.True(session.EditMask.FillContains(point))));
+    Assert.Equal(new Point(45, 45), operation.Segments[0][0]);
+    Assert.Equal(new Point(50, 50), operation.Segments[0][1]);
+    Assert.Equal(new Point(52, 52), operation.Segments[1][0]);
+    Assert.Equal(new Point(55, 55), operation.Segments[1][1]);
+  }
+
+  [Fact]
+  public void CommitRectangle_Carries_Edit_Mask_For_Future_Clipping()
+  {
+    var session = new ScreenshotAnnotationSession(
+      new Size(100, 100),
+      new EllipseGeometry(new Point(50, 50), 30, 30));
+
+    session.SetActiveTool(ScreenshotAnnotationTool.Rectangle);
+    session.CommitRectangle(
+      new Rect(10, 10, 70, 70),
+      Colors.DeepSkyBlue,
+      strokeThickness: 3);
+
+    var operation = Assert.IsType<RectangleAnnotationOperation>(Assert.Single(session.Operations));
+    Assert.True(operation.ClipMask.FillContains(new Point(50, 50)));
+    Assert.False(operation.ClipMask.FillContains(new Point(5, 5)));
   }
 }

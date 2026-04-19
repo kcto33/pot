@@ -23,7 +23,7 @@ public sealed class ScreenshotAnnotationSession
 
   public ScreenshotAnnotationTool ActiveTool { get; private set; }
 
-  public IReadOnlyList<ScreenshotAnnotationOperation> Operations => _operations;
+  public IReadOnlyList<ScreenshotAnnotationOperation> Operations => _operations.AsReadOnly();
 
   public void SetActiveTool(ScreenshotAnnotationTool tool)
   {
@@ -32,14 +32,40 @@ public sealed class ScreenshotAnnotationSession
 
   public void CommitStroke(IReadOnlyList<Point> points, Color color, double strokeThickness)
   {
-    var filteredPoints = points.Where(EditMask.FillContains).ToArray();
-    if (filteredPoints.Length < 2)
+    List<IReadOnlyList<Point>>? segments = null;
+    List<Point>? currentSegment = null;
+
+    foreach (var point in points)
+    {
+      if (EditMask.FillContains(point))
+      {
+        currentSegment ??= [];
+        currentSegment.Add(point);
+        continue;
+      }
+
+      if (currentSegment is not null && currentSegment.Count >= 2)
+      {
+        segments ??= [];
+        segments.Add(currentSegment.ToArray());
+      }
+
+      currentSegment = null;
+    }
+
+    if (currentSegment is not null && currentSegment.Count >= 2)
+    {
+      segments ??= [];
+      segments.Add(currentSegment.ToArray());
+    }
+
+    if (segments is null)
     {
       return;
     }
 
     _operations.Add(new BrushStrokeAnnotationOperation(
-      filteredPoints,
+      segments,
       color,
       strokeThickness,
       ActiveTool == ScreenshotAnnotationTool.Mosaic));
@@ -52,7 +78,7 @@ public sealed class ScreenshotAnnotationSession
       return;
     }
 
-    _operations.Add(new RectangleAnnotationOperation(bounds, color, strokeThickness));
+    _operations.Add(new RectangleAnnotationOperation(bounds, EditMask, color, strokeThickness));
   }
 
   public bool Undo()
