@@ -25,6 +25,13 @@ namespace ScreenTranslator.Windows;
 
 public sealed partial class ScreenshotOverlayWindow : Window
 {
+  internal sealed record EditModeState(
+    bool IsEditMode,
+    bool IsAnnotating,
+    WinRect SelectedRegion,
+    Rect SelectionBounds,
+    ScreenshotAnnotationSession? AnnotationSession);
+
   private const double BrushPreviewThickness = 3;
   private const double RectanglePreviewThickness = 3;
   private const double MosaicPreviewThickness = 12;
@@ -153,6 +160,45 @@ public sealed partial class ScreenshotOverlayWindow : Window
       : ScreenshotAnnotationRenderer.RenderComposite(baseImage, session);
   }
 
+  internal static EditModeState CreateEditModeState(WinRect selectedRegion, Rect selectionBounds)
+  {
+    var annotationSession = new ScreenshotAnnotationSession(
+      new WpfSize(selectedRegion.Width, selectedRegion.Height),
+      new RectangleGeometry(new Rect(0, 0, selectedRegion.Width, selectedRegion.Height)));
+    annotationSession.SetActiveTool(ScreenshotAnnotationTool.Brush);
+
+    return new EditModeState(
+      IsEditMode: true,
+      IsAnnotating: false,
+      SelectedRegion: selectedRegion,
+      SelectionBounds: selectionBounds,
+      AnnotationSession: annotationSession);
+  }
+
+  internal static EditModeState ResetEditModeState(EditModeState _)
+  {
+    return new EditModeState(
+      IsEditMode: false,
+      IsAnnotating: false,
+      SelectedRegion: WinRect.Empty,
+      SelectionBounds: Rect.Empty,
+      AnnotationSession: null);
+  }
+
+  internal static EditModeState DiscardAnnotationsForLongScreenshot(EditModeState state)
+  {
+    state.AnnotationSession?.ClearAnnotations();
+    return state with { IsAnnotating = false };
+  }
+
+  internal static bool CanBeginEditAnnotation(bool isEditMode, ScreenshotAnnotationSession? session, bool isWithinEditSurface)
+  {
+    return isEditMode &&
+           isWithinEditSurface &&
+           session is not null &&
+           session.ActiveTool != ScreenshotAnnotationTool.None;
+  }
+
   private static BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
   {
     var bitmapData = bitmap.LockBits(
@@ -186,9 +232,8 @@ public sealed partial class ScreenshotOverlayWindow : Window
 
     if (_isEditMode)
     {
-      if (_annotationSession is null ||
-          !IsDescendant(EditSurface, e.OriginalSource as DependencyObject) ||
-          _annotationSession.ActiveTool == ScreenshotAnnotationTool.None)
+      var isWithinEditSurface = IsDescendant(EditSurface, e.OriginalSource as DependencyObject);
+      if (!CanBeginEditAnnotation(_isEditMode, _annotationSession, isWithinEditSurface))
       {
         return;
       }
@@ -492,10 +537,8 @@ public sealed partial class ScreenshotOverlayWindow : Window
 
   private void EnterEditMode(Rect selectionBounds)
   {
-    _selectionBounds = selectionBounds;
-    _isEditMode = true;
+    ApplyEditModeState(CreateEditModeState(_selectedRegion, selectionBounds));
     _selectedImage = null;
-    _annotationSession = CreateAnnotationSession(_selectedRegion);
 
     Canvas.SetLeft(SelectionRect, selectionBounds.X);
     Canvas.SetTop(SelectionRect, selectionBounds.Y);
@@ -518,13 +561,6 @@ public sealed partial class ScreenshotOverlayWindow : Window
     Toolbar.Visibility = Visibility.Visible;
 
     SetActiveAnnotationTool(ScreenshotAnnotationTool.Brush);
-  }
-
-  private static ScreenshotAnnotationSession CreateAnnotationSession(WinRect selectedRegion)
-  {
-    return new ScreenshotAnnotationSession(
-      new WpfSize(selectedRegion.Width, selectedRegion.Height),
-      new RectangleGeometry(new Rect(0, 0, selectedRegion.Width, selectedRegion.Height)));
   }
 
   private void PositionToolbar(Rect selectionBounds)
@@ -743,7 +779,7 @@ public sealed partial class ScreenshotOverlayWindow : Window
       return;
     }
 
-    _annotationSession.ClearAnnotations();
+    ApplyEditModeState(DiscardAnnotationsForLongScreenshot(CaptureEditModeState()));
     _annotationPoints.Clear();
     ClearAnnotationPreview();
   }
@@ -751,13 +787,9 @@ public sealed partial class ScreenshotOverlayWindow : Window
   private void ResetSelection()
   {
     _isSelecting = false;
-    _isEditMode = false;
-    _isAnnotating = false;
     _annotationPoints.Clear();
-    _annotationSession = null;
+    ApplyEditModeState(ResetEditModeState(CaptureEditModeState()));
     _selectedImage = null;
-    _selectedRegion = WinRect.Empty;
-    _selectionBounds = Rect.Empty;
 
     ReleaseMouseCapture();
     SelectionRect.Visibility = Visibility.Collapsed;
@@ -768,6 +800,20 @@ public sealed partial class ScreenshotOverlayWindow : Window
     ClearAnnotationPreview();
     UpdateDarkOverlay(null);
     Cursor = WpfCursors.Cross;
+  }
+
+  private EditModeState CaptureEditModeState()
+  {
+    return new EditModeState(_isEditMode, _isAnnotating, _selectedRegion, _selectionBounds, _annotationSession);
+  }
+
+  private void ApplyEditModeState(EditModeState state)
+  {
+    _isEditMode = state.IsEditMode;
+    _isAnnotating = state.IsAnnotating;
+    _selectedRegion = state.SelectedRegion;
+    _selectionBounds = state.SelectionBounds;
+    _annotationSession = state.AnnotationSession;
   }
 
   private WpfPoint GetClampedEditSurfacePoint(WpfPoint point)

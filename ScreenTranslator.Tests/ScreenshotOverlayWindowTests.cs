@@ -67,6 +67,83 @@ public sealed class ScreenshotOverlayWindowTests
     Assert.Equal(GetPixel(baseImage, 1, 1), GetPixel(result, 1, 1));
   }
 
+  [Fact]
+  public void CreateEditModeState_Initializes_EditMode_With_Brush_Tool_And_Empty_Session()
+  {
+    var selectedRegion = new System.Drawing.Rectangle(100, 120, 80, 60);
+    var selectionBounds = new Rect(10, 20, 40, 30);
+
+    var state = ScreenshotOverlayWindow.CreateEditModeState(selectedRegion, selectionBounds);
+
+    Assert.True(state.IsEditMode);
+    Assert.False(state.IsAnnotating);
+    Assert.Equal(selectedRegion, state.SelectedRegion);
+    Assert.Equal(selectionBounds, state.SelectionBounds);
+    Assert.NotNull(state.AnnotationSession);
+    Assert.Equal(ScreenshotAnnotationTool.Brush, state.AnnotationSession!.ActiveTool);
+    Assert.Empty(state.AnnotationSession.Operations);
+    Assert.Equal(80, state.AnnotationSession.CanvasSize.Width);
+    Assert.Equal(60, state.AnnotationSession.CanvasSize.Height);
+  }
+
+  [Fact]
+  public void ResetEditModeState_Clears_EditMode_Selection_And_Annotations()
+  {
+    var state = ScreenshotOverlayWindow.CreateEditModeState(
+      new System.Drawing.Rectangle(100, 120, 80, 60),
+      new Rect(10, 20, 40, 30));
+    state.AnnotationSession!.CommitRectangle(new Rect(1, 2, 20, 10), Colors.Red, 3);
+
+    var resetState = ScreenshotOverlayWindow.ResetEditModeState(state);
+
+    Assert.False(resetState.IsEditMode);
+    Assert.False(resetState.IsAnnotating);
+    Assert.Equal(System.Drawing.Rectangle.Empty, resetState.SelectedRegion);
+    Assert.Equal(Rect.Empty, resetState.SelectionBounds);
+    Assert.Null(resetState.AnnotationSession);
+  }
+
+  [Fact]
+  public void DiscardAnnotationsForLongScreenshot_Clears_Operations_And_Preserves_SelectedRegion()
+  {
+    var state = ScreenshotOverlayWindow.CreateEditModeState(
+      new System.Drawing.Rectangle(100, 120, 80, 60),
+      new Rect(10, 20, 40, 30));
+    state.AnnotationSession!.CommitRectangle(new Rect(1, 2, 20, 10), Colors.Red, 3);
+
+    var updatedState = ScreenshotOverlayWindow.DiscardAnnotationsForLongScreenshot(state);
+
+    Assert.Equal(state.SelectedRegion, updatedState.SelectedRegion);
+    Assert.NotNull(updatedState.AnnotationSession);
+    Assert.Empty(updatedState.AnnotationSession!.Operations);
+    Assert.True(updatedState.IsEditMode);
+  }
+
+  [Theory]
+  [InlineData(false, true, ScreenshotAnnotationTool.Brush, false)]
+  [InlineData(true, false, ScreenshotAnnotationTool.Brush, false)]
+  [InlineData(true, true, ScreenshotAnnotationTool.None, false)]
+  [InlineData(true, true, ScreenshotAnnotationTool.Rectangle, true)]
+  public void CanBeginEditAnnotation_Only_Allows_Active_EditTool_In_EditSurface(
+    bool isEditMode,
+    bool isWithinEditSurface,
+    ScreenshotAnnotationTool tool,
+    bool expected)
+  {
+    ScreenshotAnnotationSession? session = null;
+    if (tool != ScreenshotAnnotationTool.None || isEditMode)
+    {
+      session = new ScreenshotAnnotationSession(
+        new Size(20, 20),
+        new RectangleGeometry(new Rect(0, 0, 20, 20)));
+      session.SetActiveTool(tool);
+    }
+
+    var canBegin = ScreenshotOverlayWindow.CanBeginEditAnnotation(isEditMode, session, isWithinEditSurface);
+
+    Assert.Equal(expected, canBegin);
+  }
+
   private static WriteableBitmap CreateSolidImage(int width, int height, Color color)
   {
     var bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgra32, null);
