@@ -7,3 +7,4 @@ artifacts/
 ScreenTranslator.zip
 ScreenTranslator/ScreenTranslator.exe
 ScreenTranslator_error.txt
+.worktrees/
