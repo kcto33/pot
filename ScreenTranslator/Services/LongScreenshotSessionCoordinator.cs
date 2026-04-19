@@ -85,12 +85,13 @@ public sealed class LongScreenshotSessionCoordinator : IDisposable
     }
 
     _session = _serviceFactory.CreateSession(_captureRegion, _settings.LongScreenshot ?? new LongScreenshotSettings());
+    ConfigureCaptureHooks(_session, HideOverlaysForCapture, ShowOverlaysAfterCapture);
     _session.ProgressChanged += OnProgressChanged;
     _session.Completed += OnSessionCompleted;
 
     _selectionFrameWindow.SetLocked(true);
     _selectionFrameWindow.Show();
-    _hideSelectionFrameForCapture = false;
+    _hideSelectionFrameForCapture = true;
 
     _controlWindow.PositionNearSelection(_captureRegion, _dpiScaleX, _dpiScaleY);
     _controlWindow.Show();
@@ -392,7 +393,7 @@ public sealed class LongScreenshotSessionCoordinator : IDisposable
       }
 
       _resultImage = result.Image;
-      if (_resultImage is not null)
+      if (_resultImage is not null && ShouldAutoCopyResult(_settings))
       {
         AutoCopyResult(_resultImage);
       }
@@ -434,6 +435,17 @@ public sealed class LongScreenshotSessionCoordinator : IDisposable
     {
       // keep best effort
     }
+  }
+
+  internal static void ConfigureCaptureHooks(LongScreenshotSession session, Action beforeCapture, Action afterCapture)
+  {
+    session.BeforeCapture = beforeCapture;
+    session.AfterCapture = afterCapture;
+  }
+
+  internal static bool ShouldAutoCopyResult(AppSettings settings)
+  {
+    return settings.ScreenshotAutoCopy;
   }
 
   private string? AutoSaveResult(BitmapSource image)

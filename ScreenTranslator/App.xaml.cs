@@ -32,10 +32,10 @@ public partial class App : System.Windows.Application
     _pasteHistory = new Services.PasteHistoryController(_settings, _clipboardHistory);
     _screenshotController = new Services.ScreenshotController(_settings.Settings);
 
-    _flow = new Services.SelectionFlowController(_settings, ApplyHotkey, ApplyPasteHistoryHotkey, ApplyScreenshotHotkey, UpdateClipboardHistoryMaxItems, SuspendHotkeys, ResumeHotkeys);
+    _flow = new Services.SelectionFlowController(_settings, _clipboardHistory, ApplyHotkey, ApplyPasteHistoryHotkey, ApplyScreenshotHotkey, UpdateClipboardHistoryMaxItems, SuspendHotkeys, ResumeHotkeys);
 
     _tray = new Services.TrayService(_settings);
-    _tray.StartSelectionRequested += (_, _) => _flow.StartSelection();
+    _tray.StartSelectionRequested += async (_, _) => await _flow.StartSelectionOrTranslateSelectedTextAsync();
     _tray.ShowPasteHistoryRequested += (_, _) => _pasteHistory.ShowOrClose();
     _tray.StartScreenshotRequested += (_, _) => _screenshotController?.StartScreenshot();
     _tray.ExitRequested += (_, _) => Shutdown();
@@ -46,10 +46,10 @@ public partial class App : System.Windows.Application
     _tray.Initialize();
 
     _hotkeys = new Services.HotkeyService();
-    _hotkeys.HotkeyPressedById += (_, id) =>
+    _hotkeys.HotkeyPressedById += async (_, id) =>
     {
       if (id == Services.HotkeyService.DefaultHotkeyId)
-        _flow.StartSelection();
+        await _flow.StartSelectionOrTranslateSelectedTextAsync();
       else if (id == PasteHistoryHotkeyId)
         _pasteHistory.ShowOrClose();
       else if (id == ScreenshotHotkeyId)

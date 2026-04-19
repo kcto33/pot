@@ -34,6 +34,7 @@ public sealed partial class ScreenshotOverlayWindow : Window
   private System.Drawing.Rectangle _virtualScreenPx;
   private double _dpiScaleX = 1.0;
   private double _dpiScaleY = 1.0;
+  private bool _isClosed;
 
   public ScreenshotOverlayWindow(
     AppSettings settings,
@@ -65,7 +66,7 @@ public sealed partial class ScreenshotOverlayWindow : Window
       _dpiScaleY = source.CompositionTarget.TransformToDevice.M22;
     }
 
-    CaptureAllScreens();
+    _virtualScreenPx = SystemInformation.VirtualScreen;
 
     Left = SystemParameters.VirtualScreenLeft;
     Top = SystemParameters.VirtualScreenTop;
@@ -76,11 +77,41 @@ public sealed partial class ScreenshotOverlayWindow : Window
 
     Focus();
     Cursor = WpfCursors.Cross;
+
+    _ = BeginCaptureAllScreensAsync();
   }
 
-  private void CaptureAllScreens()
+  protected override void OnClosed(EventArgs e)
   {
-    _virtualScreenPx = SystemInformation.VirtualScreen;
+    _isClosed = true;
+    base.OnClosed(e);
+  }
+
+  private async Task BeginCaptureAllScreensAsync()
+  {
+    BitmapSource? bitmap = null;
+    try
+    {
+      bitmap = await Task.Run(CaptureAllScreensBitmapSource);
+      await Dispatcher.InvokeAsync(() =>
+      {
+        if (!ShouldAssignCapturedBackground(_isClosed, bitmap))
+        {
+          return;
+        }
+
+        _capturedScreen = bitmap;
+        BackgroundImage.Source = _capturedScreen;
+      });
+    }
+    catch
+    {
+      // Best effort only. The overlay can still function without a frozen background.
+    }
+  }
+
+  private BitmapSource? CaptureAllScreensBitmapSource()
+  {
     var left = _virtualScreenPx.Left;
     var top = _virtualScreenPx.Top;
     var width = _virtualScreenPx.Width;
@@ -90,8 +121,12 @@ public sealed partial class ScreenshotOverlayWindow : Window
     using var graphics = System.Drawing.Graphics.FromImage(bitmap);
     graphics.CopyFromScreen(left, top, 0, 0, new System.Drawing.Size(width, height));
 
-    _capturedScreen = ConvertToBitmapSource(bitmap);
-    BackgroundImage.Source = _capturedScreen;
+    return ConvertToBitmapSource(bitmap);
+  }
+
+  internal static bool ShouldAssignCapturedBackground(bool isClosed, BitmapSource? bitmap)
+  {
+    return !isClosed && bitmap is not null;
   }
 
   private static BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)

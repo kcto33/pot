@@ -18,6 +18,7 @@ public sealed class ClipboardHistoryService : IDisposable
   private int _maxItems;
   private HwndSource? _source;
   private volatile string? _suppressTextOnce;
+  private int _suppressTrackingDepth;
   private bool _disposed;
 
   public event EventHandler? HistoryChanged;
@@ -79,6 +80,12 @@ public sealed class ClipboardHistoryService : IDisposable
     }
   }
 
+  public IDisposable SuppressTracking()
+  {
+    Interlocked.Increment(ref _suppressTrackingDepth);
+    return new TrackingSuppressionScope(this);
+  }
+
   public void Dispose()
   {
     if (_disposed)
@@ -124,6 +131,9 @@ public sealed class ClipboardHistoryService : IDisposable
 
         if (text.Length > MaxTextLength)
           text = text[..MaxTextLength];
+
+        if (Volatile.Read(ref _suppressTrackingDepth) > 0)
+          return;
 
         // 线程安全地读取并清除抑制标记
         var suppress = Interlocked.Exchange(ref _suppressTextOnce, null);
@@ -181,4 +191,25 @@ public sealed class ClipboardHistoryService : IDisposable
 
   private static bool IsClipboardBusy(Exception ex) =>
     ex is COMException || ex is ExternalException;
+
+  private void ReleaseTrackingSuppression()
+  {
+    if (Interlocked.Decrement(ref _suppressTrackingDepth) < 0)
+      Interlocked.Exchange(ref _suppressTrackingDepth, 0);
+  }
+
+  private sealed class TrackingSuppressionScope : IDisposable
+  {
+    private ClipboardHistoryService? _owner;
+
+    public TrackingSuppressionScope(ClipboardHistoryService owner)
+    {
+      _owner = owner;
+    }
+
+    public void Dispose()
+    {
+      Interlocked.Exchange(ref _owner, null)?.ReleaseTrackingSuppression();
+    }
+  }
 }

@@ -1,8 +1,10 @@
 ﻿using System.Collections.Frozen;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Text;
 using Windows.Globalization;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
@@ -11,6 +13,11 @@ namespace ScreenTranslator.Services;
 
 public sealed class OcrService
 {
+  private const int RetryMinWidthPx = 220;
+  private const int RetryMinHeightPx = 72;
+  private const int RetryMaxScale = 4;
+  private const int RetryPaddingPx = 12;
+
   private readonly Dictionary<string, OcrEngine> _engines = new(StringComparer.OrdinalIgnoreCase);
   private readonly object _lock = new();
   private OcrEngine? _fallback;
@@ -57,13 +64,24 @@ public sealed class OcrService
 
     ct.ThrowIfCancellationRequested();
     var tag = NormalizeLanguage(languageTag);
-    if (IsAuto(tag))
+    var recognizedText = await RecognizeWithLanguageAsync(softwareBitmap, tag, ct);
+    if (!string.IsNullOrWhiteSpace(recognizedText) || !ShouldRetryWithEnhancedBitmap(converted))
+      return recognizedText;
+
+    using var enhancedBitmap = CreateEnhancedRetryBitmap(converted);
+    using var enhancedSoftwareBitmap = ToSoftwareBitmap(enhancedBitmap);
+    return await RecognizeWithLanguageAsync(enhancedSoftwareBitmap, tag, ct);
+  }
+
+  private async Task<string> RecognizeWithLanguageAsync(SoftwareBitmap softwareBitmap, string? languageTag, CancellationToken ct)
+  {
+    ct.ThrowIfCancellationRequested();
+    if (IsAuto(languageTag))
       return await RecognizeAutoAsync(softwareBitmap, ct);
 
-    var engine = GetEngine(tag);
+    var engine = GetEngine(languageTag);
     var result = await engine.RecognizeAsync(softwareBitmap);
-
-    return (result.Text ?? string.Empty).Trim();
+    return ExtractText(result);
   }
 
   private async Task<string> RecognizeAutoAsync(SoftwareBitmap softwareBitmap, CancellationToken ct)
@@ -74,7 +92,7 @@ public sealed class OcrService
 
     var primary = GetFallbackEngine();
     var primaryResult = await primary.RecognizeAsync(sharedBitmap);
-    var primaryText = (primaryResult.Text ?? string.Empty).Trim();
+    var primaryText = ExtractText(primaryResult);
     if (!string.IsNullOrWhiteSpace(primaryText))
       return primaryText;
 
@@ -85,7 +103,7 @@ public sealed class OcrService
         continue;
 
       var result = await engine.RecognizeAsync(sharedBitmap);
-      var text = (result.Text ?? string.Empty).Trim();
+      var text = ExtractText(result);
       if (!string.IsNullOrWhiteSpace(text))
         return text;
     }
@@ -168,6 +186,87 @@ public sealed class OcrService
     using var g = Graphics.FromImage(bmp);
     g.DrawImage(src, 0, 0, src.Width, src.Height);
     return bmp;
+  }
+
+  internal static bool ShouldRetryWithEnhancedBitmap(Bitmap bitmap)
+  {
+    return bitmap.Width < RetryMinWidthPx || bitmap.Height < RetryMinHeightPx;
+  }
+
+  internal static Bitmap CreateEnhancedRetryBitmap(Bitmap src)
+  {
+    var scale = GetRetryScale(src.Width, src.Height);
+    var padding = Math.Max(RetryPaddingPx, Math.Min(src.Width, src.Height) / 3);
+    var width = (src.Width * scale) + (padding * 2);
+    var height = (src.Height * scale) + (padding * 2);
+    var background = EstimatePaddingColor(src);
+
+    var bmp = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+    using var g = Graphics.FromImage(bmp);
+    g.Clear(background);
+    g.CompositingQuality = CompositingQuality.HighQuality;
+    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+    g.SmoothingMode = SmoothingMode.HighQuality;
+    g.DrawImage(src, new Rectangle(padding, padding, src.Width * scale, src.Height * scale));
+
+    return bmp;
+  }
+
+  private static int GetRetryScale(int width, int height)
+  {
+    var scaleForWidth = (int)Math.Ceiling((double)RetryMinWidthPx / Math.Max(1, width));
+    var scaleForHeight = (int)Math.Ceiling((double)RetryMinHeightPx / Math.Max(1, height));
+    return Math.Clamp(Math.Max(2, Math.Max(scaleForWidth, scaleForHeight)), 2, RetryMaxScale);
+  }
+
+  private static Color EstimatePaddingColor(Bitmap src)
+  {
+    var samples = new[]
+    {
+      src.GetPixel(0, 0),
+      src.GetPixel(src.Width - 1, 0),
+      src.GetPixel(0, src.Height - 1),
+      src.GetPixel(src.Width - 1, src.Height - 1),
+    };
+
+    var a = 0;
+    var r = 0;
+    var g = 0;
+    var b = 0;
+
+    foreach (var color in samples)
+    {
+      a += color.A;
+      r += color.R;
+      g += color.G;
+      b += color.B;
+    }
+
+    return Color.FromArgb(a / samples.Length, r / samples.Length, g / samples.Length, b / samples.Length);
+  }
+
+  private static string ExtractText(OcrResult result)
+  {
+    if (result.Lines is not { Count: > 0 })
+      return (result.Text ?? string.Empty).Trim();
+
+    var builder = new StringBuilder();
+    for (var i = 0; i < result.Lines.Count; i++)
+    {
+      var lineText = result.Lines[i]?.Text?.Trim();
+      if (string.IsNullOrWhiteSpace(lineText))
+        continue;
+
+      if (builder.Length > 0)
+        builder.AppendLine();
+
+      builder.Append(lineText);
+    }
+
+    return builder.Length > 0
+      ? builder.ToString()
+      : (result.Text ?? string.Empty).Trim();
   }
 
   private static SoftwareBitmap ToSoftwareBitmap(Bitmap bmp)

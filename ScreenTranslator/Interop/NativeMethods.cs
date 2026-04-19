@@ -99,6 +99,9 @@ internal static class NativeMethods
   [DllImport("user32.dll")]
   internal static extern bool SetForegroundWindow(IntPtr hWnd);
 
+  [DllImport("user32.dll")]
+  internal static extern IntPtr GetForegroundWindow();
+
   // Windows 10 2004+ (build 19041): excludes window from screen capture.
   internal const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
 
@@ -131,6 +134,8 @@ internal static class NativeMethods
   internal const uint VK_ESCAPE = 0x1B;
   internal const uint VK_UP = 0x26;
   internal const uint VK_DOWN = 0x28;
+  internal const uint VK_CONTROL = 0x11;
+  internal const uint VK_C = 0x43;
 
   [DllImport("user32.dll", SetLastError = true)]
   internal static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
