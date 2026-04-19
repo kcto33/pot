@@ -104,6 +104,33 @@ public sealed class FreeformScreenshotWindowTests
   }
 
   [Fact]
+  public void RenderFreeformSelection_Uses_PixelSized_Output_For_Non100Dpi_Crops()
+  {
+    var baseImage = CreateHorizontalGradientImage(15, 9);
+    var geometry = new PathGeometry(
+      new[]
+      {
+        new PathFigure(
+          new Point(10.2, 12.4),
+          new PathSegment[]
+          {
+            new LineSegment(new Point(20.8, 12.4), true),
+            new LineSegment(new Point(20.8, 18.8), true),
+            new LineSegment(new Point(10.2, 18.8), true)
+          },
+          true)
+      });
+    var boundingRect = new Rect(10.2, 12.4, 10.6, 6.4);
+    var pixelBounds = FreeformScreenshotWindow.GetPixelBounds(boundingRect, dpiScaleX: 1.5, dpiScaleY: 1.5);
+
+    var result = FreeformScreenshotWindow.RenderFreeformSelection(baseImage, geometry, boundingRect, pixelBounds);
+
+    Assert.Equal(15, result.PixelWidth);
+    Assert.Equal(9, result.PixelHeight);
+    Assert.Equal(GetPixel(baseImage, 14, 4), GetPixel(result, 14, 4));
+  }
+
+  [Fact]
   public void ResetEditModeState_Clears_Freeform_EditMode_And_Annotations()
   {
     var state = FreeformScreenshotWindow.CreateEditModeState(
@@ -186,5 +213,27 @@ public sealed class FreeformScreenshotWindowTests
     var pixels = new byte[4];
     source.CopyPixels(new Int32Rect(x, y, 1, 1), pixels, 4, 0);
     return BitConverter.ToUInt32(pixels, 0);
+  }
+
+  private static WriteableBitmap CreateHorizontalGradientImage(int width, int height)
+  {
+    var bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgra32, null);
+    var pixels = new byte[width * height * 4];
+
+    for (var y = 0; y < height; y++)
+    {
+      for (var x = 0; x < width; x++)
+      {
+        var offset = ((y * width) + x) * 4;
+        var intensity = (byte)(x * 255 / Math.Max(1, width - 1));
+        pixels[offset + 0] = intensity;
+        pixels[offset + 1] = intensity;
+        pixels[offset + 2] = intensity;
+        pixels[offset + 3] = 255;
+      }
+    }
+
+    bitmap.WritePixels(new Int32Rect(0, 0, width, height), pixels, width * 4, 0);
+    return bitmap;
   }
 }

@@ -335,29 +335,7 @@ public sealed partial class FreeformScreenshotWindow : Window
     }
 
     var croppedBitmap = new CroppedBitmap(_capturedScreen, new Int32Rect(cropX, cropY, cropWidth, cropHeight));
-
-    var drawingVisual = new DrawingVisual();
-    using (var dc = drawingVisual.RenderOpen())
-    {
-      var transformedGeometry = _completedGeometry.Clone();
-      transformedGeometry.Transform = new TranslateTransform(-_boundingRect.X, -_boundingRect.Y);
-
-      dc.PushClip(transformedGeometry);
-      dc.DrawImage(croppedBitmap, new Rect(0, 0, _boundingRect.Width, _boundingRect.Height));
-      dc.Pop();
-    }
-
-    var renderTarget = new RenderTargetBitmap(
-      cropWidth,
-      cropHeight,
-      _capturedScreen.DpiX,
-      _capturedScreen.DpiY,
-      PixelFormats.Pbgra32);
-
-    renderTarget.Render(drawingVisual);
-    renderTarget.Freeze();
-
-    return renderTarget;
+    return RenderFreeformSelection(croppedBitmap, _completedGeometry, _boundingRect, pixelBounds);
   }
 
   private BitmapSource? GetCurrentOutputImage()
@@ -827,6 +805,38 @@ public sealed partial class FreeformScreenshotWindow : Window
     localGeometry.Transform = transformGroup;
     localGeometry.Freeze();
     return localGeometry;
+  }
+
+  internal static BitmapSource RenderFreeformSelection(
+    BitmapSource croppedBitmap,
+    PathGeometry completedGeometry,
+    Rect boundingRect,
+    PixelBounds pixelBounds)
+  {
+    var drawingVisual = new DrawingVisual();
+    using (var dc = drawingVisual.RenderOpen())
+    {
+      var pixelMask = CreateLocalMaskGeometry(
+        completedGeometry,
+        boundingRect,
+        pixelBounds.Width / Math.Max(1, boundingRect.Width),
+        pixelBounds.Height / Math.Max(1, boundingRect.Height));
+
+      dc.PushClip(pixelMask);
+      dc.DrawImage(croppedBitmap, new Rect(0, 0, pixelBounds.Width, pixelBounds.Height));
+      dc.Pop();
+    }
+
+    var renderTarget = new RenderTargetBitmap(
+      pixelBounds.Width,
+      pixelBounds.Height,
+      croppedBitmap.DpiX,
+      croppedBitmap.DpiY,
+      PixelFormats.Pbgra32);
+
+    renderTarget.Render(drawingVisual);
+    renderTarget.Freeze();
+    return renderTarget;
   }
 
   internal static PixelBounds GetPixelBounds(Rect boundingRect, double dpiScaleX, double dpiScaleY)
