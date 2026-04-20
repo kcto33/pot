@@ -166,6 +166,9 @@ internal static class NativeMethods
   [DllImport("user32.dll", SetLastError = true)]
   internal static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
+  [DllImport("user32.dll")]
+  internal static extern uint GetClipboardSequenceNumber();
+
   [StructLayout(LayoutKind.Sequential)]
   internal struct POINT
   {

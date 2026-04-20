@@ -12,6 +12,7 @@ public sealed class SelectedTextCaptureService
   private readonly IPlatform _platform;
   private readonly Func<IDisposable?> _suppressClipboardHistory;
   private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
+  private readonly Action<string>? _log;
   private readonly int _timeoutMs;
   private readonly int _settleDelayMs;
   private readonly int _pollIntervalMs;
@@ -27,7 +28,8 @@ public sealed class SelectedTextCaptureService
       (delay, ct) => Task.Delay(delay, ct),
       timeoutMs,
       settleDelayMs,
-      pollIntervalMs)
+      pollIntervalMs,
+      SelectedTextCaptureDiagnostics.Log)
   {
   }
 
@@ -43,7 +45,8 @@ public sealed class SelectedTextCaptureService
       (delay, ct) => Task.Delay(delay, ct),
       timeoutMs,
       settleDelayMs,
-      pollIntervalMs)
+      pollIntervalMs,
+      null)
   {
   }
 
@@ -53,11 +56,13 @@ public sealed class SelectedTextCaptureService
     Func<TimeSpan, CancellationToken, Task> delayAsync,
     int timeoutMs,
     int settleDelayMs,
-    int pollIntervalMs)
+    int pollIntervalMs,
+    Action<string>? log = null)
   {
     _platform = platform;
     _suppressClipboardHistory = suppressClipboardHistory;
     _delayAsync = delayAsync;
+    _log = log;
     _timeoutMs = Math.Max(1, timeoutMs);
     _settleDelayMs = Math.Max(0, settleDelayMs);
     _pollIntervalMs = Math.Max(1, pollIntervalMs);
@@ -67,40 +72,74 @@ public sealed class SelectedTextCaptureService
   {
     ct.ThrowIfCancellationRequested();
     if (!_platform.CanCapture())
+    {
+      _log?.Invoke("capture skipped: no foreground window");
       return null;
+    }
 
     ClipboardSnapshot? snapshot = null;
     using var suppression = _suppressClipboardHistory();
+    var captureId = Guid.NewGuid().ToString("N")[..8];
 
     try
     {
       snapshot = await _platform.CaptureClipboardAsync(ct);
-      await _platform.ClearClipboardAsync(ct);
+      var originalSequence = _platform.GetClipboardSequenceNumber();
+      var snapshotTextLength = snapshot.Text?.Length ?? 0;
+      _log?.Invoke($"capture {captureId} start: originalSeq={originalSequence} snapshotHasData={snapshot.HasData} snapshotTextLength={snapshotTextLength} timeoutMs={_timeoutMs} pollIntervalMs={_pollIntervalMs}");
 
       if (_settleDelayMs > 0)
         await _delayAsync(TimeSpan.FromMilliseconds(_settleDelayMs), ct);
 
       await _platform.SendCopyAsync(ct);
+      _log?.Invoke($"capture {captureId} copy sent");
 
       var attempts = Math.Max(1, (int)Math.Ceiling((double)_timeoutMs / _pollIntervalMs));
+      var sawSequenceChange = false;
+      var lastSequence = originalSequence;
       for (var attempt = 0; attempt < attempts; attempt++)
       {
         ct.ThrowIfCancellationRequested();
 
+        var currentSequence = _platform.GetClipboardSequenceNumber();
+        lastSequence = currentSequence;
+        if (currentSequence == originalSequence)
+        {
+          if (attempt + 1 < attempts)
+            await _delayAsync(TimeSpan.FromMilliseconds(_pollIntervalMs), ct);
+          continue;
+        }
+
+        if (!sawSequenceChange)
+        {
+          sawSequenceChange = true;
+          _log?.Invoke($"capture {captureId} clipboard changed: attempt={attempt + 1} seq={currentSequence}");
+        }
+
         var text = await _platform.ReadClipboardTextAsync(ct);
         if (!string.IsNullOrWhiteSpace(text))
-          return text.Trim();
+        {
+          var trimmed = text.Trim();
+          _log?.Invoke($"capture {captureId} success: attempt={attempt + 1} seq={currentSequence} textLength={trimmed.Length}");
+          return trimmed;
+        }
+
+        _log?.Invoke($"capture {captureId} sequence changed but clipboard text empty: attempt={attempt + 1} seq={currentSequence}");
 
         if (attempt + 1 < attempts)
           await _delayAsync(TimeSpan.FromMilliseconds(_pollIntervalMs), ct);
       }
+
+      _log?.Invoke($"capture {captureId} timeout: lastSeq={lastSequence} sawSequenceChange={sawSequenceChange}");
     }
     catch (OperationCanceledException)
     {
+      _log?.Invoke($"capture {captureId} canceled");
       throw;
     }
-    catch
+    catch (Exception ex)
     {
+      _log?.Invoke($"capture {captureId} failed: {ex.GetType().Name}: {ex.Message}");
       return null;
     }
     finally
@@ -110,10 +149,11 @@ public sealed class SelectedTextCaptureService
         try
         {
           await _platform.RestoreClipboardAsync(snapshot, CancellationToken.None);
+          _log?.Invoke($"capture {captureId} clipboard restored");
         }
-        catch
+        catch (Exception ex)
         {
-          // Clipboard restore is best effort.
+          _log?.Invoke($"capture {captureId} clipboard restore failed: {ex.GetType().Name}: {ex.Message}");
         }
       }
     }
@@ -126,6 +166,7 @@ public sealed class SelectedTextCaptureService
     bool CanCapture();
     Task<ClipboardSnapshot> CaptureClipboardAsync(CancellationToken ct);
     Task ClearClipboardAsync(CancellationToken ct);
+    uint GetClipboardSequenceNumber();
     Task<string?> ReadClipboardTextAsync(CancellationToken ct);
     Task RestoreClipboardAsync(ClipboardSnapshot snapshot, CancellationToken ct);
     Task SendCopyAsync(CancellationToken ct);
@@ -215,6 +256,8 @@ public sealed class SelectedTextCaptureService
 
       return null;
     }
+
+    public uint GetClipboardSequenceNumber() => NativeMethods.GetClipboardSequenceNumber();
 
     public async Task RestoreClipboardAsync(ClipboardSnapshot snapshot, CancellationToken ct)
     {

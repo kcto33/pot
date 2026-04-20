@@ -135,10 +135,12 @@ public sealed class SelectionFlowController
     var selectedText = await _tryCaptureSelectedTextAsync(CancellationToken.None);
     if (!string.IsNullOrWhiteSpace(selectedText))
     {
+      SelectedTextCaptureDiagnostics.Log($"flow route=selected-text textLength={selectedText.Length}");
       await _showSelectedTextTranslationAsync(selectedText, CancellationToken.None);
       return;
     }
 
+    SelectedTextCaptureDiagnostics.Log("flow route=overlay-fallback");
     _startOverlaySelection();
   }
 
