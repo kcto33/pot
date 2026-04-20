@@ -11,6 +11,7 @@
     <AssemblyName>transtools</AssemblyName>
     <Product>transtools</Product>
     <Title>transtools</Title>
+    <Version>1.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 

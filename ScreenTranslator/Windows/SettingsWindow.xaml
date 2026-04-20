@@ -647,9 +647,22 @@
     </TabControl>
 
     <Border Grid.Row="1" BorderThickness="0,1,0,0" BorderBrush="#E0E0E0" Background="White" Padding="16">
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button x:Name="SaveButton" Content="{DynamicResource Btn_SaveSettings}" Style="{StaticResource PrimaryButton}" />
-      </StackPanel>
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <TextBlock x:Name="VersionTextBlock"
+                   Grid.Column="0"
+                   VerticalAlignment="Center"
+                   FontSize="12"
+                   Foreground="{StaticResource SecondaryTextBrush}" />
+
+        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+          <Button x:Name="SaveButton" Content="{DynamicResource Btn_SaveSettings}" Style="{StaticResource PrimaryButton}" />
+        </StackPanel>
+      </Grid>
     </Border>
   </Grid>
 </Window>

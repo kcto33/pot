@@ -1,6 +1,7 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Reflection;
 using ScreenTranslator.Models;
 using ScreenTranslator.Services;
 using WpfColor = System.Windows.Media.Color;
@@ -15,6 +16,7 @@ namespace ScreenTranslator.Windows;
 
 public partial class SettingsWindow : Window
 {
+  private const string DefaultDisplayVersion = "1.0.0";
   private readonly SettingsService _settings;
   private readonly AutoStartService _autoStart = new();
   private readonly Func<string, string?>? _applyHotkey;
@@ -93,6 +95,7 @@ public partial class SettingsWindow : Window
     _updateClipboardHistoryMaxItems = updateClipboardHistoryMaxItems;
     _suspendHotkeys = suspendHotkeys;
     _resumeHotkeys = resumeHotkeys;
+    VersionTextBlock.Text = $"Version {GetDisplayVersion()}";
 
     InitializeUILanguageControls();
     InitializeProviderControls();
@@ -102,6 +105,39 @@ public partial class SettingsWindow : Window
     InitializeEventHandlers();
 
     LoadFromSettings();
+  }
+
+  internal static string NormalizeDisplayVersion(string? rawVersion)
+  {
+    if (string.IsNullOrWhiteSpace(rawVersion))
+      return DefaultDisplayVersion;
+
+    var coreVersion = rawVersion.Trim();
+    var metadataSeparator = coreVersion.IndexOf('+');
+    if (metadataSeparator >= 0)
+      coreVersion = coreVersion[..metadataSeparator];
+
+    var prereleaseSeparator = coreVersion.IndexOf('-');
+    if (prereleaseSeparator >= 0)
+      coreVersion = coreVersion[..prereleaseSeparator];
+
+    if (Version.TryParse(coreVersion, out var parsedVersion))
+    {
+      var build = parsedVersion.Build >= 0 ? parsedVersion.Build : 0;
+      return $"{parsedVersion.Major}.{parsedVersion.Minor}.{build}";
+    }
+
+    return DefaultDisplayVersion;
+  }
+
+  private static string GetDisplayVersion()
+  {
+    var assembly = typeof(SettingsWindow).Assembly;
+    var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    if (!string.IsNullOrWhiteSpace(informationalVersion))
+      return NormalizeDisplayVersion(informationalVersion);
+
+    return NormalizeDisplayVersion(assembly.GetName().Version?.ToString());
   }
 
   private void TrySetWindowIcon()
