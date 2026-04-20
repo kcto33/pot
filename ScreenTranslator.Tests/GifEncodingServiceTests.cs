@@ -25,6 +25,43 @@ public sealed class GifEncodingServiceTests
     Assert.Equal(new ushort[] { 12, 13, 12, 13 }, delays);
   }
 
+  [Fact]
+  public void BuildFrameSequence_Collapses_Consecutive_Duplicate_Frames()
+  {
+    var frames = new[]
+    {
+      CreateSolidFrame(4, 4, Colors.Red),
+      CreateSolidFrame(4, 4, Colors.Red),
+      CreateSolidFrame(4, 4, Colors.Blue),
+    };
+
+    var sequence = GifEncodingService.BuildFrameSequence(
+      frames,
+      GifRecordingDefaults.FrameIntervalMs,
+      GifRecordingDefaults.MinimumDistinctFrameDelayMs);
+
+    Assert.Equal(2, sequence.Frames.Count);
+    Assert.Equal(2, sequence.Delays.Count);
+    Assert.True(sequence.Delays[0] > sequence.Delays[1]);
+  }
+
+  [Fact]
+  public void BuildFrameSequence_Enforces_Minimum_Delay_For_Distinct_Frames()
+  {
+    var frames = new[]
+    {
+      CreateSolidFrame(4, 4, Colors.Red),
+      CreateSolidFrame(4, 4, Colors.Blue),
+    };
+
+    var sequence = GifEncodingService.BuildFrameSequence(
+      frames,
+      GifRecordingDefaults.FrameIntervalMs,
+      GifRecordingDefaults.MinimumDistinctFrameDelayMs);
+
+    Assert.Equal(new ushort[] { 25, 25 }, sequence.Delays);
+  }
+
   [Theory]
   [InlineData(0)]
   [InlineData(-1)]
@@ -74,10 +111,29 @@ public sealed class GifEncodingServiceTests
     var firstMetadata = Assert.IsType<BitmapMetadata>(decoder.Frames[0].Metadata);
     var secondMetadata = Assert.IsType<BitmapMetadata>(decoder.Frames[1].Metadata);
 
-    Assert.Equal((ushort)12, Assert.IsType<ushort>(firstMetadata.GetQuery("/grctlext/Delay")));
-    Assert.Equal((ushort)13, Assert.IsType<ushort>(secondMetadata.GetQuery("/grctlext/Delay")));
+    Assert.Equal((ushort)25, Assert.IsType<ushort>(firstMetadata.GetQuery("/grctlext/Delay")));
+    Assert.Equal((ushort)25, Assert.IsType<ushort>(secondMetadata.GetQuery("/grctlext/Delay")));
     Assert.Equal((byte)2, Assert.IsType<byte>(firstMetadata.GetQuery("/grctlext/Disposal")));
     Assert.Equal((byte)2, Assert.IsType<byte>(secondMetadata.GetQuery("/grctlext/Disposal")));
+  }
+
+  [Fact]
+  public void Encode_Removes_Identical_Adjacent_Frames_From_Output()
+  {
+    var service = new GifEncodingService();
+    var frames = new[]
+    {
+      CreateSolidFrame(6, 4, Colors.Red),
+      CreateSolidFrame(6, 4, Colors.Red),
+      CreateSolidFrame(6, 4, Colors.Blue),
+    };
+
+    var bytes = service.Encode(frames, GifRecordingDefaults.FrameIntervalMs);
+
+    using var stream = new MemoryStream(bytes);
+    var decoder = new GifBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+
+    Assert.Equal(2, decoder.Frames.Count);
   }
 
   private static BitmapSource CreateSolidFrame(int width, int height, Color color)

@@ -6,6 +6,8 @@ namespace ScreenTranslator.Services;
 
 public sealed class GifEncodingService
 {
+  internal sealed record FrameSequence(IReadOnlyList<BitmapSource> Frames, IReadOnlyList<ushort> Delays);
+
   public byte[] Encode(IReadOnlyList<BitmapSource> frames, int frameIntervalMs)
   {
     if (frameIntervalMs <= 0)
@@ -19,13 +21,13 @@ public sealed class GifEncodingService
     }
 
     var encoder = new GifBitmapEncoder();
-    var delays = BuildFrameDelays(frameIntervalMs, frames.Count);
+    var frameSequence = BuildFrameSequence(frames, frameIntervalMs, GifRecordingDefaults.MinimumDistinctFrameDelayMs);
 
-    for (var index = 0; index < frames.Count; index++)
+    for (var index = 0; index < frameSequence.Frames.Count; index++)
     {
-      var normalizedFrame = NormalizeFrame(frames[index]);
+      var normalizedFrame = frameSequence.Frames[index];
       var metadata = new BitmapMetadata("gif");
-      metadata.SetQuery("/grctlext/Delay", delays[index]);
+      metadata.SetQuery("/grctlext/Delay", frameSequence.Delays[index]);
       metadata.SetQuery("/grctlext/Disposal", (byte)2);
 
       var frame = BitmapFrame.Create(normalizedFrame, null, metadata, null);
@@ -35,8 +37,48 @@ public sealed class GifEncodingService
     using var stream = new MemoryStream();
     encoder.Save(stream);
     var bytes = stream.ToArray();
-    PatchGraphicControlExtensions(bytes, delays, frames.Count);
+    PatchGraphicControlExtensions(bytes, frameSequence.Delays, frameSequence.Frames.Count);
     return bytes;
+  }
+
+  internal static FrameSequence BuildFrameSequence(
+    IReadOnlyList<BitmapSource> frames,
+    int frameIntervalMs,
+    int minimumDistinctFrameDelayMs)
+  {
+    if (frames.Count == 0)
+    {
+      return new FrameSequence([], []);
+    }
+
+    var uniqueFrames = new List<BitmapSource>(frames.Count);
+    var delayMilliseconds = new List<int>(frames.Count);
+    byte[]? previousPixels = null;
+    var previousWidth = 0;
+    var previousHeight = 0;
+
+    foreach (var frame in frames)
+    {
+      var normalizedFrame = NormalizeFrame(frame);
+      var pixels = CopyPixels(normalizedFrame);
+
+      if (previousPixels is not null &&
+          previousWidth == normalizedFrame.PixelWidth &&
+          previousHeight == normalizedFrame.PixelHeight &&
+          pixels.AsSpan().SequenceEqual(previousPixels))
+      {
+        delayMilliseconds[^1] += frameIntervalMs;
+        continue;
+      }
+
+      uniqueFrames.Add(normalizedFrame);
+      delayMilliseconds.Add(Math.Max(frameIntervalMs, minimumDistinctFrameDelayMs));
+      previousPixels = pixels;
+      previousWidth = normalizedFrame.PixelWidth;
+      previousHeight = normalizedFrame.PixelHeight;
+    }
+
+    return new FrameSequence(uniqueFrames, BuildFrameDelays(delayMilliseconds));
   }
 
   internal static IReadOnlyList<ushort> BuildFrameDelays(int frameIntervalMs, int frameCount)
@@ -67,6 +109,34 @@ public sealed class GifEncodingService
     return delays;
   }
 
+  internal static IReadOnlyList<ushort> BuildFrameDelays(IReadOnlyList<int> frameDelayMilliseconds)
+  {
+    if (frameDelayMilliseconds.Count == 0)
+    {
+      return Array.Empty<ushort>();
+    }
+
+    var delays = new ushort[frameDelayMilliseconds.Count];
+    var remainderAccumulator = 0;
+
+    for (var index = 0; index < frameDelayMilliseconds.Count; index++)
+    {
+      var delayMs = Math.Max(1, frameDelayMilliseconds[index]);
+      var baseDelay = delayMs / 10;
+      remainderAccumulator += delayMs % 10;
+
+      if (remainderAccumulator >= 10)
+      {
+        baseDelay++;
+        remainderAccumulator -= 10;
+      }
+
+      delays[index] = (ushort)Math.Max(1, baseDelay);
+    }
+
+    return delays;
+  }
+
   private static BitmapSource NormalizeFrame(BitmapSource frame)
   {
     if (frame.Format == PixelFormats.Bgra32)
@@ -81,6 +151,14 @@ public sealed class GifEncodingService
     }
 
     return converted;
+  }
+
+  private static byte[] CopyPixels(BitmapSource frame)
+  {
+    var stride = frame.PixelWidth * 4;
+    var pixels = new byte[stride * frame.PixelHeight];
+    frame.CopyPixels(pixels, stride, 0);
+    return pixels;
   }
 
   private static void PatchGraphicControlExtensions(byte[] bytes, IReadOnlyList<ushort> delays, int expectedFrameCount)
