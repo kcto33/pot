@@ -13,7 +13,7 @@ using WpfSaveFileDialog = Microsoft.Win32.SaveFileDialog;
 
 namespace ScreenTranslator.Services;
 
-public sealed class LongScreenshotSessionCoordinator : IDisposable
+public sealed class LongScreenshotSessionCoordinator : IDisposable, IScreenshotRegionSession
 {
   private readonly AppSettings _settings;
   private readonly Action<BitmapSource, WinRect, double, double> _onPinRequested;
@@ -439,8 +439,25 @@ public sealed class LongScreenshotSessionCoordinator : IDisposable
 
   internal static void ConfigureCaptureHooks(LongScreenshotSession session, Action beforeCapture, Action afterCapture)
   {
-    session.BeforeCapture = beforeCapture;
-    session.AfterCapture = afterCapture;
+    session.BeforeCapture = WrapCaptureHook(beforeCapture, callback => InvokeOnUiThreadOrInline(callback));
+    session.AfterCapture = WrapCaptureHook(afterCapture, callback => InvokeOnUiThreadOrInline(callback));
+  }
+
+  internal static Action WrapCaptureHook(Action hook, Action<Action> invokeOnUiThread)
+  {
+    return () => invokeOnUiThread(hook);
+  }
+
+  internal static void InvokeOnUiThreadOrInline(Action callback)
+  {
+    var dispatcher = WpfApplication.Current?.Dispatcher;
+    if (dispatcher is null)
+    {
+      callback();
+      return;
+    }
+
+    dispatcher.Invoke(callback);
   }
 
   internal static bool ShouldAutoCopyResult(AppSettings settings)
