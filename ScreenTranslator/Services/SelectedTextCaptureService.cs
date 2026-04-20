@@ -221,11 +221,12 @@ public sealed class SelectedTextCaptureService
         ct.ThrowIfCancellationRequested();
         try
         {
-          var dataObject = WpfClipboard.GetDataObject();
           var text = WpfClipboard.ContainsText(WpfTextDataFormat.UnicodeText)
             ? WpfClipboard.GetText(WpfTextDataFormat.UnicodeText)
             : null;
-          return new ClipboardSnapshot(dataObject, text, dataObject is not null);
+          return string.IsNullOrEmpty(text)
+            ? new ClipboardSnapshot(null, null, hasData: true)
+            : new ClipboardSnapshot(null, text, hasData: true);
         }
         catch (Exception ex) when (IsClipboardBusy(ex))
         {
@@ -233,9 +234,7 @@ public sealed class SelectedTextCaptureService
         }
       }
 
-      return new ClipboardSnapshot(null, WpfClipboard.ContainsText(WpfTextDataFormat.UnicodeText)
-        ? WpfClipboard.GetText(WpfTextDataFormat.UnicodeText)
-        : null, false);
+      return new ClipboardSnapshot(null, null, hasData: true);
     }
 
     public async Task ClearClipboardAsync(CancellationToken ct)
