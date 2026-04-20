@@ -26,7 +26,71 @@ public sealed class GifEncodingServiceTests
   }
 
   [Fact]
-  public void Encode_Returns_Animated_Gif_With_Expected_Frame_Delays()
+  public void BuildFrameSequence_Collapses_Consecutive_Duplicate_Frames()
+  {
+    var frames = new[]
+    {
+      CreateSolidFrame(4, 4, Colors.Red),
+      CreateSolidFrame(4, 4, Colors.Red),
+      CreateSolidFrame(4, 4, Colors.Blue),
+    };
+
+    var sequence = GifEncodingService.BuildFrameSequence(
+      frames,
+      GifRecordingDefaults.FrameIntervalMs,
+      GifRecordingDefaults.MinimumDistinctFrameDelayMs);
+
+    Assert.Equal(2, sequence.Frames.Count);
+    Assert.Equal(2, sequence.Delays.Count);
+    Assert.True(sequence.Delays[0] > sequence.Delays[1]);
+  }
+
+  [Fact]
+  public void BuildFrameSequence_Enforces_Minimum_Delay_For_Distinct_Frames()
+  {
+    var frames = new[]
+    {
+      CreateSolidFrame(4, 4, Colors.Red),
+      CreateSolidFrame(4, 4, Colors.Blue),
+    };
+
+    var sequence = GifEncodingService.BuildFrameSequence(
+      frames,
+      GifRecordingDefaults.FrameIntervalMs,
+      GifRecordingDefaults.MinimumDistinctFrameDelayMs);
+
+    Assert.Equal(new ushort[] { 25, 25 }, sequence.Delays);
+  }
+
+  [Theory]
+  [InlineData(0)]
+  [InlineData(-1)]
+  public void Encode_Throws_When_Frame_Interval_Is_Not_Positive(int frameIntervalMs)
+  {
+    var service = new GifEncodingService();
+
+    Assert.Throws<ArgumentOutOfRangeException>(() =>
+      service.Encode([CreateSolidFrame(4, 4, Colors.Red)], frameIntervalMs));
+  }
+
+  [Fact]
+  public void Encode_Normalizes_Non_Bgra32_Frames_Before_Encoding()
+  {
+    var service = new GifEncodingService();
+    var frame = CreateGray8Frame(6, 4);
+
+    var bytes = service.Encode([frame], GifRecordingDefaults.FrameIntervalMs);
+
+    using var stream = new MemoryStream(bytes);
+    var decoder = new GifBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+
+    Assert.Single(decoder.Frames);
+    Assert.Equal(6, decoder.Frames[0].PixelWidth);
+    Assert.Equal(4, decoder.Frames[0].PixelHeight);
+  }
+
+  [Fact]
+  public void Encode_Returns_Animated_Gif_With_Expected_Frame_Metadata()
   {
     var service = new GifEncodingService();
     var frames = new[]
@@ -44,8 +108,32 @@ public sealed class GifEncodingServiceTests
     Assert.Equal(6, decoder.Frames[0].PixelWidth);
     Assert.Equal(4, decoder.Frames[0].PixelHeight);
 
-    var metadata = Assert.IsType<BitmapMetadata>(decoder.Frames[1].Metadata);
-    Assert.Equal((ushort)13, Assert.IsType<ushort>(metadata.GetQuery("/grctlext/Delay")));
+    var firstMetadata = Assert.IsType<BitmapMetadata>(decoder.Frames[0].Metadata);
+    var secondMetadata = Assert.IsType<BitmapMetadata>(decoder.Frames[1].Metadata);
+
+    Assert.Equal((ushort)25, Assert.IsType<ushort>(firstMetadata.GetQuery("/grctlext/Delay")));
+    Assert.Equal((ushort)25, Assert.IsType<ushort>(secondMetadata.GetQuery("/grctlext/Delay")));
+    Assert.Equal((byte)2, Assert.IsType<byte>(firstMetadata.GetQuery("/grctlext/Disposal")));
+    Assert.Equal((byte)2, Assert.IsType<byte>(secondMetadata.GetQuery("/grctlext/Disposal")));
+  }
+
+  [Fact]
+  public void Encode_Removes_Identical_Adjacent_Frames_From_Output()
+  {
+    var service = new GifEncodingService();
+    var frames = new[]
+    {
+      CreateSolidFrame(6, 4, Colors.Red),
+      CreateSolidFrame(6, 4, Colors.Red),
+      CreateSolidFrame(6, 4, Colors.Blue),
+    };
+
+    var bytes = service.Encode(frames, GifRecordingDefaults.FrameIntervalMs);
+
+    using var stream = new MemoryStream(bytes);
+    var decoder = new GifBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+
+    Assert.Equal(2, decoder.Frames.Count);
   }
 
   private static BitmapSource CreateSolidFrame(int width, int height, Color color)
@@ -62,6 +150,20 @@ public sealed class GifEncodingServiceTests
     }
 
     bitmap.WritePixels(new Int32Rect(0, 0, width, height), pixels, width * 4, 0);
+    bitmap.Freeze();
+    return bitmap;
+  }
+
+  private static BitmapSource CreateGray8Frame(int width, int height)
+  {
+    var pixels = new byte[width * height];
+
+    for (var index = 0; index < pixels.Length; index++)
+    {
+      pixels[index] = (byte)(index * 11);
+    }
+
+    var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Gray8, null, pixels, width);
     bitmap.Freeze();
     return bitmap;
   }
