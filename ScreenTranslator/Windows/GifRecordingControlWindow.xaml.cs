@@ -14,7 +14,7 @@ namespace ScreenTranslator.Windows;
 public sealed partial class GifRecordingControlWindow : Window
 {
   internal static readonly TimeSpan StartupClickDebounce = TimeSpan.FromMilliseconds(250);
-  private readonly DateTime _shownAtUtc = DateTime.UtcNow;
+  private DateTime _shownAtUtc = DateTime.MinValue;
 
   public event Action? StopRequested;
   public event Action? CancelRequested;
@@ -80,6 +80,12 @@ public sealed partial class GifRecordingControlWindow : Window
     ex |= NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW;
     NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE, ex);
     NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
+  }
+
+  protected override void OnContentRendered(EventArgs e)
+  {
+    base.OnContentRendered(e);
+    _shownAtUtc = DateTime.UtcNow;
   }
 
   public void FocusWindow()

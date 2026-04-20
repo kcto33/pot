@@ -1,8 +1,7 @@
 using System.Globalization;
 using System.IO;
 using System.Windows;
-
-using Microsoft.Win32;
+using System.Windows.Media.Imaging;
 
 using ScreenTranslator.Models;
 using ScreenTranslator.Windows;
@@ -20,10 +19,14 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
   private readonly WinRect _captureRegion;
   private readonly double _dpiScaleX;
   private readonly double _dpiScaleY;
-  private readonly GifRecordingService _recordingService;
-  private readonly GifEncodingService _encodingService;
-  private readonly SelectionFrameWindow _selectionFrameWindow;
-  private readonly GifRecordingControlWindow _controlWindow;
+  private readonly IGifRecordingRunner _recordingRunner;
+  private readonly IGifEncodingRunner _encodingRunner;
+  private readonly ISelectionFrameView _selectionFrameWindow;
+  private readonly IGifRecordingControlView _controlWindow;
+  private readonly IGifSaveDialogService _saveDialogService;
+  private readonly IGifMessageService _messageService;
+  private readonly IGifFileWriter _fileWriter;
+  private readonly IUiDispatcher _uiDispatcher;
 
   private CancellationTokenSource? _cancellationTokenSource;
   private bool _disposed;
@@ -40,18 +43,51 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
     double dpiScaleY,
     GifRecordingService? recordingService = null,
     GifEncodingService? encodingService = null)
+    : this(
+        settings,
+        captureRegion,
+        dpiScaleX,
+        dpiScaleY,
+        new GifRecordingRunnerAdapter(recordingService ?? new GifRecordingService()),
+        new GifEncodingRunnerAdapter(encodingService ?? new GifEncodingService()),
+        new SelectionFrameWindowAdapter(new SelectionFrameWindow()),
+        new GifRecordingControlWindowAdapter(new GifRecordingControlWindow()),
+        new WpfGifSaveDialogService(),
+        new WpfGifMessageService(),
+        new GifFileWriter(),
+        new WpfUiDispatcher())
+  {
+  }
+
+  internal GifRecordingSessionCoordinator(
+    AppSettings settings,
+    WinRect captureRegion,
+    double dpiScaleX,
+    double dpiScaleY,
+    IGifRecordingRunner recordingRunner,
+    IGifEncodingRunner encodingRunner,
+    ISelectionFrameView selectionFrameWindow,
+    IGifRecordingControlView controlWindow,
+    IGifSaveDialogService saveDialogService,
+    IGifMessageService messageService,
+    IGifFileWriter fileWriter,
+    IUiDispatcher uiDispatcher)
   {
     _settings = settings;
     _captureRegion = captureRegion;
     _dpiScaleX = dpiScaleX;
     _dpiScaleY = dpiScaleY;
-    _recordingService = recordingService ?? new GifRecordingService();
-    _encodingService = encodingService ?? new GifEncodingService();
+    _recordingRunner = recordingRunner;
+    _encodingRunner = encodingRunner;
+    _selectionFrameWindow = selectionFrameWindow;
+    _controlWindow = controlWindow;
+    _saveDialogService = saveDialogService;
+    _messageService = messageService;
+    _fileWriter = fileWriter;
+    _uiDispatcher = uiDispatcher;
 
-    _selectionFrameWindow = new SelectionFrameWindow();
     _selectionFrameWindow.Initialize(captureRegion, dpiScaleX, dpiScaleY);
 
-    _controlWindow = new GifRecordingControlWindow();
     _controlWindow.StopRequested += OnStopRequested;
     _controlWindow.CancelRequested += OnCancelRequested;
   }
@@ -65,8 +101,8 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
 
     _cancellationTokenSource = new CancellationTokenSource();
 
-    ConfigureCaptureHooks(_recordingService, HideOverlaysForCapture, ShowOverlaysAfterCapture);
-    _recordingService.ProgressChanged += OnProgressChanged;
+    ConfigureRunnerCaptureHooks(HideOverlaysForCapture, ShowOverlaysAfterCapture);
+    _recordingRunner.ProgressChanged += OnProgressChanged;
 
     _selectionFrameWindow.SetLocked(true);
     _selectionFrameWindow.Show();
@@ -97,9 +133,9 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
 
     _disposed = true;
 
-    _recordingService.ProgressChanged -= OnProgressChanged;
-    _recordingService.BeforeCapture = null;
-    _recordingService.AfterCapture = null;
+    _recordingRunner.ProgressChanged -= OnProgressChanged;
+    _recordingRunner.BeforeCapture = null;
+    _recordingRunner.AfterCapture = null;
 
     _controlWindow.StopRequested -= OnStopRequested;
     _controlWindow.CancelRequested -= OnCancelRequested;
@@ -119,8 +155,8 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
       _cancellationTokenSource = null;
     }
 
-    SafeClose(_selectionFrameWindow);
-    SafeClose(_controlWindow);
+    _selectionFrameWindow.Close();
+    _controlWindow.Close();
 
     Closed?.Invoke();
   }
@@ -160,10 +196,16 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
     return string.Format(CultureInfo.InvariantCulture, "GifRecording_{0:yyyyMMdd_HHmmss}.gif", now);
   }
 
+  private void ConfigureRunnerCaptureHooks(Action beforeCapture, Action afterCapture)
+  {
+    _recordingRunner.BeforeCapture = WrapCaptureHook(beforeCapture, callback => _uiDispatcher.Invoke(callback));
+    _recordingRunner.AfterCapture = WrapCaptureHook(afterCapture, callback => _uiDispatcher.Invoke(callback));
+  }
+
   private void OnStopRequested()
   {
     _controlWindow.SetStoppingHint();
-    _recordingService.RequestStop();
+    _recordingRunner.RequestStop();
   }
 
   private void OnCancelRequested()
@@ -174,7 +216,7 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
 
   private void OnProgressChanged(GifRecordingProgress progress)
   {
-    WpfApplication.Current?.Dispatcher.BeginInvoke(() =>
+    _uiDispatcher.BeginInvoke(() =>
     {
       if (_disposed)
       {
@@ -191,29 +233,14 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
 
     try
     {
-      result = await _recordingService.RecordAsync(_captureRegion, cancellationToken).ConfigureAwait(false);
+      result = await _recordingRunner.RecordAsync(_captureRegion, cancellationToken).ConfigureAwait(false);
     }
     catch (OperationCanceledException)
     {
       _wasCanceled = true;
     }
 
-    var dispatcher = WpfApplication.Current?.Dispatcher;
-    if (dispatcher is null)
-    {
-      if (result is not null)
-      {
-        CompleteRecording(result);
-      }
-      else
-      {
-        Dispose();
-      }
-
-      return;
-    }
-
-    _ = dispatcher.BeginInvoke(() =>
+    _uiDispatcher.BeginInvoke(() =>
     {
       if (_disposed)
       {
@@ -226,11 +253,11 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
         return;
       }
 
-      CompleteRecording(result);
+      _ = CompleteRecordingAsync(result);
     });
   }
 
-  private void CompleteRecording(GifCaptureResult result)
+  private async Task CompleteRecordingAsync(GifCaptureResult result)
   {
     try
     {
@@ -238,48 +265,45 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
       {
         if (!_wasCanceled && !string.IsNullOrWhiteSpace(result.ErrorMessage))
         {
-          WpfMessageBox.Show(
+          _messageService.ShowWarning(
             result.ErrorMessage,
-            LocalizationService.GetString("GifRecording_Title", "GIF Recording"),
-            MessageBoxButton.OK,
-            MessageBoxImage.Warning);
+            LocalizationService.GetString("GifRecording_Title", "GIF Recording"));
         }
 
         return;
       }
 
-      var bytes = _encodingService.Encode(result.Frames, GifRecordingDefaults.FrameIntervalMs);
-      var dialog = new WpfSaveFileDialog
-      {
-        Filter = LocalizationService.GetString("FileDialog_GifFilter", "GIF Image|*.gif"),
-        DefaultExt = ".gif",
-        FileName = BuildDefaultFileName(DateTime.Now),
-        InitialDirectory = GetSafeSaveDirectory(),
-        AddExtension = true,
-        OverwritePrompt = true,
-      };
+      var savePath = _saveDialogService.ShowSaveDialog(
+        GetSafeSaveDirectory(),
+        BuildDefaultFileName(DateTime.Now),
+        LocalizationService.GetString("FileDialog_GifFilter", "GIF Image|*.gif"));
 
-      if (dialog.ShowDialog() != true)
+      if (string.IsNullOrWhiteSpace(savePath))
       {
         return;
       }
 
+      var bytes = await Task.Run(
+        () => _encodingRunner.Encode(result.Frames, GifRecordingDefaults.FrameIntervalMs))
+        .ConfigureAwait(false);
+
       try
       {
-        File.WriteAllBytes(dialog.FileName, bytes);
+        await _fileWriter.WriteAllBytesAsync(savePath, bytes, CancellationToken.None).ConfigureAwait(false);
       }
       catch
       {
-        WpfMessageBox.Show(
-          LocalizationService.GetString("GifRecording_Error_SaveFailed", "Failed to save GIF."),
-          LocalizationService.GetString("GifRecording_Title", "GIF Recording"),
-          MessageBoxButton.OK,
-          MessageBoxImage.Warning);
+        _uiDispatcher.BeginInvoke(() =>
+        {
+          _messageService.ShowWarning(
+            LocalizationService.GetString("GifRecording_Error_SaveFailed", "Failed to save GIF."),
+            LocalizationService.GetString("GifRecording_Title", "GIF Recording"));
+        });
       }
     }
     finally
     {
-      Dispose();
+      _uiDispatcher.BeginInvoke(Dispose);
     }
   }
 
@@ -339,6 +363,275 @@ public sealed class GifRecordingSessionCoordinator : IDisposable
     {
       _controlWindow.Show();
       _controlWindowWasVisibleBeforeCapture = false;
+    }
+  }
+
+  internal interface IGifRecordingRunner
+  {
+    Action? BeforeCapture { get; set; }
+    Action? AfterCapture { get; set; }
+    event Action<GifRecordingProgress>? ProgressChanged;
+    void RequestStop();
+    Task<GifCaptureResult> RecordAsync(WinRect region, CancellationToken cancellationToken);
+  }
+
+  internal interface IGifEncodingRunner
+  {
+    byte[] Encode(IReadOnlyList<BitmapSource> frames, int frameIntervalMs);
+  }
+
+  internal interface ISelectionFrameView
+  {
+    bool IsVisible { get; }
+    void Initialize(WinRect captureRegion, double dpiScaleX, double dpiScaleY);
+    void SetLocked(bool locked);
+    void Show();
+    void Hide();
+    void Close();
+  }
+
+  internal interface IGifRecordingControlView
+  {
+    event Action? StopRequested;
+    event Action? CancelRequested;
+    bool IsVisible { get; }
+    bool PositionNearSelection(WinRect captureRegion, double dpiScaleX, double dpiScaleY);
+    void UpdateProgress(TimeSpan elapsed);
+    void SetStoppingHint();
+    void Show();
+    void Hide();
+    void Close();
+    void FocusWindow();
+  }
+
+  internal interface IGifSaveDialogService
+  {
+    string? ShowSaveDialog(string initialDirectory, string defaultFileName, string filter);
+  }
+
+  internal interface IGifMessageService
+  {
+    void ShowWarning(string message, string title);
+  }
+
+  internal interface IGifFileWriter
+  {
+    Task WriteAllBytesAsync(string path, byte[] bytes, CancellationToken cancellationToken);
+  }
+
+  internal interface IUiDispatcher
+  {
+    void Invoke(Action callback);
+    void BeginInvoke(Action callback);
+  }
+
+  private sealed class GifRecordingRunnerAdapter : IGifRecordingRunner
+  {
+    private readonly GifRecordingService _service;
+
+    public GifRecordingRunnerAdapter(GifRecordingService service)
+    {
+      _service = service;
+    }
+
+    public Action? BeforeCapture
+    {
+      get => _service.BeforeCapture;
+      set => _service.BeforeCapture = value;
+    }
+
+    public Action? AfterCapture
+    {
+      get => _service.AfterCapture;
+      set => _service.AfterCapture = value;
+    }
+
+    public event Action<GifRecordingProgress>? ProgressChanged
+    {
+      add => _service.ProgressChanged += value;
+      remove => _service.ProgressChanged -= value;
+    }
+
+    public void RequestStop()
+    {
+      _service.RequestStop();
+    }
+
+    public Task<GifCaptureResult> RecordAsync(WinRect region, CancellationToken cancellationToken)
+    {
+      return _service.RecordAsync(region, cancellationToken);
+    }
+  }
+
+  private sealed class GifEncodingRunnerAdapter : IGifEncodingRunner
+  {
+    private readonly GifEncodingService _service;
+
+    public GifEncodingRunnerAdapter(GifEncodingService service)
+    {
+      _service = service;
+    }
+
+    public byte[] Encode(IReadOnlyList<BitmapSource> frames, int frameIntervalMs)
+    {
+      return _service.Encode(frames, frameIntervalMs);
+    }
+  }
+
+  private sealed class SelectionFrameWindowAdapter : ISelectionFrameView
+  {
+    private readonly SelectionFrameWindow _window;
+
+    public SelectionFrameWindowAdapter(SelectionFrameWindow window)
+    {
+      _window = window;
+    }
+
+    public bool IsVisible => _window.IsVisible;
+
+    public void Initialize(WinRect captureRegion, double dpiScaleX, double dpiScaleY)
+    {
+      _window.Initialize(captureRegion, dpiScaleX, dpiScaleY);
+    }
+
+    public void SetLocked(bool locked)
+    {
+      _window.SetLocked(locked);
+    }
+
+    public void Show()
+    {
+      _window.Show();
+    }
+
+    public void Hide()
+    {
+      _window.Hide();
+    }
+
+    public void Close()
+    {
+      SafeClose(_window);
+    }
+  }
+
+  private sealed class GifRecordingControlWindowAdapter : IGifRecordingControlView
+  {
+    private readonly GifRecordingControlWindow _window;
+
+    public GifRecordingControlWindowAdapter(GifRecordingControlWindow window)
+    {
+      _window = window;
+    }
+
+    public event Action? StopRequested
+    {
+      add => _window.StopRequested += value;
+      remove => _window.StopRequested -= value;
+    }
+
+    public event Action? CancelRequested
+    {
+      add => _window.CancelRequested += value;
+      remove => _window.CancelRequested -= value;
+    }
+
+    public bool IsVisible => _window.IsVisible;
+
+    public bool PositionNearSelection(WinRect captureRegion, double dpiScaleX, double dpiScaleY)
+    {
+      return _window.PositionNearSelection(captureRegion, dpiScaleX, dpiScaleY);
+    }
+
+    public void UpdateProgress(TimeSpan elapsed)
+    {
+      _window.UpdateProgress(elapsed);
+    }
+
+    public void SetStoppingHint()
+    {
+      _window.SetStoppingHint();
+    }
+
+    public void Show()
+    {
+      _window.Show();
+    }
+
+    public void Hide()
+    {
+      _window.Hide();
+    }
+
+    public void Close()
+    {
+      SafeClose(_window);
+    }
+
+    public void FocusWindow()
+    {
+      _window.FocusWindow();
+    }
+  }
+
+  private sealed class WpfGifSaveDialogService : IGifSaveDialogService
+  {
+    public string? ShowSaveDialog(string initialDirectory, string defaultFileName, string filter)
+    {
+      var dialog = new WpfSaveFileDialog
+      {
+        Filter = filter,
+        DefaultExt = ".gif",
+        FileName = defaultFileName,
+        InitialDirectory = initialDirectory,
+        AddExtension = true,
+        OverwritePrompt = true,
+      };
+
+      return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+  }
+
+  private sealed class WpfGifMessageService : IGifMessageService
+  {
+    public void ShowWarning(string message, string title)
+    {
+      WpfMessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+  }
+
+  private sealed class GifFileWriter : IGifFileWriter
+  {
+    public Task WriteAllBytesAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+    {
+      return File.WriteAllBytesAsync(path, bytes, cancellationToken);
+    }
+  }
+
+  private sealed class WpfUiDispatcher : IUiDispatcher
+  {
+    public void Invoke(Action callback)
+    {
+      var dispatcher = WpfApplication.Current?.Dispatcher;
+      if (dispatcher is null)
+      {
+        callback();
+        return;
+      }
+
+      dispatcher.Invoke(callback);
+    }
+
+    public void BeginInvoke(Action callback)
+    {
+      var dispatcher = WpfApplication.Current?.Dispatcher;
+      if (dispatcher is null)
+      {
+        callback();
+        return;
+      }
+
+      _ = dispatcher.BeginInvoke(callback);
     }
   }
 
