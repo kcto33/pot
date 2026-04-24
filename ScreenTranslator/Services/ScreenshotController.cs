@@ -1,3 +1,4 @@
+using System.Windows.Forms;
 using System.Windows.Media.Imaging;
 
 using ScreenTranslator.Models;
@@ -316,7 +317,7 @@ public sealed class ScreenshotController
   {
     return Task.Run(() =>
     {
-      var virtualScreen = ScreenMetricsService.GetVirtualScreenBoundsPx();
+      var virtualScreen = SystemInformation.VirtualScreen;
       using var bitmap = new System.Drawing.Bitmap(virtualScreen.Width, virtualScreen.Height);
       using var graphics = System.Drawing.Graphics.FromImage(bitmap);
       graphics.CopyFromScreen(
@@ -332,7 +333,6 @@ public sealed class ScreenshotController
 
   private static BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
   {
-    const double ScreenCaptureDpi = 96.0;
     var bitmapData = bitmap.LockBits(
       new WinRect(0, 0, bitmap.Width, bitmap.Height),
       System.Drawing.Imaging.ImageLockMode.ReadOnly,
@@ -343,8 +343,8 @@ public sealed class ScreenshotController
       var bitmapSource = BitmapSource.Create(
         bitmapData.Width,
         bitmapData.Height,
-        ScreenCaptureDpi,
-        ScreenCaptureDpi,
+        bitmap.HorizontalResolution,
+        bitmap.VerticalResolution,
         System.Windows.Media.PixelFormats.Bgra32,
         null,
         bitmapData.Scan0,

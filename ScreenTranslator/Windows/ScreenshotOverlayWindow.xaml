@@ -38,10 +38,7 @@
   </Window.Resources>
 
   <Grid>
-    <Image x:Name="BackgroundImage"
-           HorizontalAlignment="Left"
-           VerticalAlignment="Top"
-           Stretch="Fill" />
+    <Image x:Name="BackgroundImage" Stretch="None" />
 
     <Canvas x:Name="OverlayCanvas">
       <Path x:Name="DarkOverlay" Fill="#66000000" />

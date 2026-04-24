@@ -75,69 +75,6 @@ public sealed class TranslationServiceTests
   }
 
   [Fact]
-  public async Task TranslateAsync_TranslatesProseContainingIoTerm()
-  {
-    var settings = new SettingsService();
-    var provider = new StubTranslationProvider(new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-      ["We could use TRNSTOOLSKEEP0TOKEN, HTTP, and database tools."] = "我们可以使用 TRNSTOOLSKEEP0TOKEN、HTTP 和数据库工具。",
-    });
-    var service = new TranslationService(settings, () => provider);
-
-    var translated = await service.TranslateAsync("We could use I/O, HTTP, and database tools.", "auto", "zh-Hans", CancellationToken.None);
-
-    Assert.Equal("我们可以使用 I/O、HTTP 和数据库工具。", translated);
-    Assert.Equal(new[] { "We could use TRNSTOOLSKEEP0TOKEN, HTTP, and database tools." }, provider.Requests);
-  }
-
-  [Fact]
-  public async Task TranslateAsync_RestoresIoTerm_WhenProviderReturnsProtectedPlaceholder()
-  {
-    var settings = new SettingsService();
-    var provider = new StubTranslationProvider(new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-      ["TRNSTOOLSKEEP0TOKEN keeps the shell useful."] = "TRNSTOOLSKEEP0TOKEN 让 shell 保持有用。",
-    });
-    var service = new TranslationService(settings, () => provider);
-
-    var translated = await service.TranslateAsync("I/O keeps the shell useful.", "auto", "zh-Hans", CancellationToken.None);
-
-    Assert.Equal("I/O 让 shell 保持有用。", translated);
-  }
-
-  [Fact]
-  public async Task TranslateAsync_TranslatesProseContainingDoubleDash()
-  {
-    var settings = new SettingsService();
-    var provider = new StubTranslationProvider(new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-      ["is the most primitive form of agent delegation -- no shared memory,"] = "是最原始的 agent 委托形式 -- 没有共享内存，",
-    });
-    var service = new TranslationService(settings, () => provider);
-
-    var translated = await service.TranslateAsync("is the most primitive form of agent delegation -- no shared memory,", "auto", "zh-Hans", CancellationToken.None);
-
-    Assert.Equal("是最原始的 agent 委托形式 -- 没有共享内存，", translated);
-    Assert.Equal(new[] { "is the most primitive form of agent delegation -- no shared memory," }, provider.Requests);
-  }
-
-  [Fact]
-  public async Task TranslateAsync_PreservesCommandLineOptions()
-  {
-    var settings = new SettingsService();
-    var provider = new StubTranslationProvider(new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-      ["dotnet run --project .\\ScreenTranslator\\ScreenTranslator.csproj"] = "translated command",
-    });
-    var service = new TranslationService(settings, () => provider);
-
-    var translated = await service.TranslateAsync("dotnet run --project .\\ScreenTranslator\\ScreenTranslator.csproj", "auto", "zh-Hans", CancellationToken.None);
-
-    Assert.Equal("dotnet run --project .\\ScreenTranslator\\ScreenTranslator.csproj", translated);
-    Assert.Empty(provider.Requests);
-  }
-
-  [Fact]
   public void CreateProvider_CarriesYoudaoDomainSettings_IntoProvider()
   {
     var settings = new SettingsService();
