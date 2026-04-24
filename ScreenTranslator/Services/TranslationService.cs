@@ -16,6 +16,15 @@ public sealed class TranslationService
   private static readonly Regex CommandStartPattern = new(
     @"^\s*(dotnet|npm|npx|yarn|pnpm|git|cargo|python|pip|node|go|java|javac|msbuild|pwsh|powershell|cmd)\b",
     RegexOptions.Compiled | RegexOptions.IgnoreCase);
+  private static readonly Regex PathLikePattern = new(
+    @"^(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|[\\/]|[^\s]+[\\/][^\s]+)$",
+    RegexOptions.Compiled);
+  private static readonly Regex CommandLineOptionPattern = new(
+    @"(^|\s)--[A-Za-z0-9][A-Za-z0-9_-]*(?=\s|=|$)",
+    RegexOptions.Compiled);
+  private static readonly Regex InlineTechnicalTermPattern = new(
+    @"\bI/O\b",
+    RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
   public TranslationService(SettingsService settings)
   {
@@ -111,9 +120,8 @@ public sealed class TranslationService
     if (CommandStartPattern.IsMatch(trimmed))
       return true;
 
-    if (trimmed.Contains('\\')
-      || trimmed.Contains('/')
-      || trimmed.Contains("--", StringComparison.Ordinal)
+    if (PathLikePattern.IsMatch(trimmed)
+      || CommandLineOptionPattern.IsMatch(trimmed)
       || trimmed.Contains(".csproj", StringComparison.OrdinalIgnoreCase)
       || trimmed.Contains(".sln", StringComparison.OrdinalIgnoreCase)
       || trimmed.Contains(".dll", StringComparison.OrdinalIgnoreCase)
@@ -141,15 +149,19 @@ public sealed class TranslationService
     if (ShouldPreserveOriginalSegment(text))
       return text;
 
+    var protectedText = ProtectInlineTechnicalTerms(text, out var protectedTerms);
+
     string translated;
     try
     {
-      translated = await provider.TranslateAsync(text, from, to, ct);
+      translated = await provider.TranslateAsync(protectedText, from, to, ct);
     }
     catch when (ShouldPreserveOriginalSegment(text))
     {
       return text;
     }
+
+    translated = RestoreInlineTechnicalTerms(translated, protectedTerms);
 
     if (!ShouldRetryWithSplitWords(text, translated))
       return translated;
@@ -158,8 +170,40 @@ public sealed class TranslationService
     if (string.Equals(splitText, text, StringComparison.Ordinal))
       return translated;
 
-    var retried = await provider.TranslateAsync(splitText, from, to, ct);
+    var protectedSplitText = ProtectInlineTechnicalTerms(splitText, out var splitProtectedTerms);
+    var retried = await provider.TranslateAsync(protectedSplitText, from, to, ct);
+    retried = RestoreInlineTechnicalTerms(retried, splitProtectedTerms);
     return string.IsNullOrWhiteSpace(retried) ? translated : retried;
+  }
+
+  private static string ProtectInlineTechnicalTerms(string text, out Dictionary<string, string> protectedTerms)
+  {
+    var terms = new Dictionary<string, string>(StringComparer.Ordinal);
+    if (string.IsNullOrWhiteSpace(text))
+    {
+      protectedTerms = terms;
+      return text;
+    }
+
+    var protectedText = InlineTechnicalTermPattern.Replace(text, match =>
+    {
+      var placeholder = $"TRNSTOOLSKEEP{terms.Count}TOKEN";
+      terms[placeholder] = match.Value;
+      return placeholder;
+    });
+    protectedTerms = terms;
+    return protectedText;
+  }
+
+  private static string RestoreInlineTechnicalTerms(string text, Dictionary<string, string> protectedTerms)
+  {
+    if (string.IsNullOrEmpty(text) || protectedTerms.Count == 0)
+      return text;
+
+    foreach (var pair in protectedTerms)
+      text = text.Replace(pair.Key, pair.Value, StringComparison.Ordinal);
+
+    return text;
   }
 
   private ITranslationProvider CreateYoudao()
