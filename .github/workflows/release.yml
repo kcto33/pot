@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Read release version from tag
+        id: release_version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>\d+\.\d+\.\d+)$')
+          {
+            throw "Release tags must use the v<major>.<minor>.<patch> format, for example v1.0.3."
+          }
+
+          "app_version=$($Matches.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Build package
+        shell: pwsh
+        run: .\scripts\Publish-OneFile.ps1 -Version "${{ steps.release_version.outputs.app_version }}" -VersionSuffix $env:GITHUB_REF_NAME
+
+      - name: Locate package
+        id: package
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path .\artifacts\packages -Filter "*.zip" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if (-not $zip)
+          {
+            throw "No release zip package was produced."
+          }
+
+          "zip_path=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "zip_name=$($zip.Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME "${{ steps.package.outputs.zip_path }}" `
+            --title "transtools $env:GITHUB_REF_NAME" `
+            --notes "Automated release for $env:GITHUB_REF_NAME."

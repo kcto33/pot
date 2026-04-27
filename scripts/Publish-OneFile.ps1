@@ -1,6 +1,7 @@
 param(
   [string]$Configuration = "Release",
   [string]$Runtime = "win-x64",
+  [string]$Version = "",
   [string]$VersionSuffix = "",
   [switch]$NoZip
 )
@@ -55,6 +56,14 @@ $publishArgs = @(
   "-p:DebugSymbols=false",
   "-o", $publishDir
 )
+
+if ($Version)
+{
+  $publishArgs += "-p:Version=$Version"
+  $publishArgs += "-p:AssemblyVersion=$Version"
+  $publishArgs += "-p:FileVersion=$Version"
+  $publishArgs += "-p:IncludeSourceRevisionInInformationalVersion=false"
+}
 
 & dotnet @publishArgs
 if ($LASTEXITCODE -ne 0)
