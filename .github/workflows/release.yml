@@ -35,29 +35,42 @@ jobs:
 
       - name: Build package
         shell: pwsh
-        run: .\scripts\Publish-OneFile.ps1 -Version "${{ steps.release_version.outputs.app_version }}" -VersionSuffix $env:GITHUB_REF_NAME
+        run: .\scripts\Publish-OneFile.ps1 -Version "${{ steps.release_version.outputs.app_version }}" -VersionSuffix $env:GITHUB_REF_NAME -NoZip
 
-      - name: Locate package
-        id: package
+      - name: Install Inno Setup
         shell: pwsh
         run: |
-          $zip = Get-ChildItem -Path .\artifacts\packages -Filter "*.zip" |
+          choco install innosetup --no-progress -y
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"))
+          {
+            throw "ISCC.exe was not found after installing Inno Setup."
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: .\scripts\Build-Installer.ps1 -Version "${{ steps.release_version.outputs.app_version }}" -InnoSetupCompiler "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+
+      - name: Locate installer
+        id: installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path .\artifacts\installers -Filter "*-setup.exe" |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
-          if (-not $zip)
+          if (-not $installer)
           {
-            throw "No release zip package was produced."
+            throw "No setup installer was produced."
           }
 
-          "zip_path=$($zip.FullName)" >> $env:GITHUB_OUTPUT
-          "zip_name=$($zip.Name)" >> $env:GITHUB_OUTPUT
+          "installer_path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          "installer_name=$($installer.Name)" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME "${{ steps.package.outputs.zip_path }}" `
+          gh release create $env:GITHUB_REF_NAME "${{ steps.installer.outputs.installer_path }}" `
             --title "transtools $env:GITHUB_REF_NAME" `
             --notes "Automated release for $env:GITHUB_REF_NAME."

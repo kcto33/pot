@@ -48,7 +48,7 @@ Default output:
 - `artifacts\packages\transtools-win-x64-onefile-<yyyyMMdd>\transtools.exe`
 - `artifacts\packages\transtools-win-x64-onefile-<yyyyMMdd>.zip`
 
-GitHub Release publishing is tag-driven. Push a version tag and GitHub Actions will use that tag as the app version, build the package, and upload the zip to the matching release:
+GitHub Release publishing is tag-driven. Push a version tag and GitHub Actions will use that tag as the app version, build the app, create a setup installer, and upload the installer to the matching release:
 
 ```powershell
 git tag v1.0.3

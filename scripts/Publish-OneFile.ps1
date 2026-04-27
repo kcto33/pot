@@ -22,11 +22,17 @@ if ($VersionSuffix)
 
 $packageName = ($nameParts | Where-Object { $_ }) -join "-"
 $publishDir = Join-Path $packageRoot $packageName
+$latestPublishDir = Join-Path $packageRoot "transtools-$Runtime-onefile-latest"
 $zipPath = "$publishDir.zip"
 
 if (Test-Path $publishDir)
 {
   Remove-Item $publishDir -Recurse -Force
+}
+
+if (Test-Path $latestPublishDir)
+{
+  Remove-Item $latestPublishDir -Recurse -Force
 }
 
 New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
@@ -76,6 +82,8 @@ if (-not (Test-Path $exePath))
 {
   throw "Publish succeeded but $publishExeName was not found at $exePath."
 }
+
+Copy-Item -Path $publishDir -Destination $latestPublishDir -Recurse -Force
 
 if (-not $NoZip)
 {
