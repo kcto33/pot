@@ -305,6 +305,16 @@ public sealed partial class ScreenshotOverlayWindow : Window, IScreenshotOverlay
            session.ActiveTool != ScreenshotAnnotationTool.None;
   }
 
+  internal static bool ShouldCommitTextDraftBeforeStartingNewTextAnnotation(
+    bool isTextBoxVisible,
+    ScreenshotAnnotationTool activeTool,
+    bool isTextBoxClick)
+  {
+    return isTextBoxVisible &&
+           activeTool == ScreenshotAnnotationTool.Text &&
+           !isTextBoxClick;
+  }
+
   private static BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
   {
     const double ScreenCaptureDpi = 96.0;
@@ -351,10 +361,20 @@ public sealed partial class ScreenshotOverlayWindow : Window, IScreenshotOverlay
         return;
       }
 
-      if (AnnotationTextBox.Visibility == Visibility.Visible &&
-          IsDescendant(AnnotationTextBox, e.OriginalSource as DependencyObject))
+      var isTextBoxVisible = AnnotationTextBox.Visibility == Visibility.Visible;
+      var isTextBoxClick = isTextBoxVisible &&
+                           IsDescendant(AnnotationTextBox, e.OriginalSource as DependencyObject);
+      if (isTextBoxClick)
       {
         return;
+      }
+
+      if (ShouldCommitTextDraftBeforeStartingNewTextAnnotation(
+            isTextBoxVisible,
+            _annotationSession?.ActiveTool ?? ScreenshotAnnotationTool.None,
+            isTextBoxClick))
+      {
+        CommitTextAnnotation();
       }
 
       if (_annotationSession?.ActiveTool == ScreenshotAnnotationTool.Text)
