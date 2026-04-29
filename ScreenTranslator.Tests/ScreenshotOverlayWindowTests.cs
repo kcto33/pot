@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -216,6 +217,20 @@ public sealed class ScreenshotOverlayWindowTests
       isTextBoxVisible,
       activeTool,
       isTextBoxClick);
+
+    Assert.Equal(expected, shouldCommit);
+  }
+
+  [Theory]
+  [InlineData(Key.Enter, ModifierKeys.None, true)]
+  [InlineData(Key.Enter, ModifierKeys.Shift, false)]
+  [InlineData(Key.Escape, ModifierKeys.None, false)]
+  public void ShouldCommitTextAnnotationKey_Only_Commits_Plain_Enter(
+    Key key,
+    ModifierKeys modifiers,
+    bool expected)
+  {
+    var shouldCommit = ScreenshotOverlayWindow.ShouldCommitTextAnnotationKey(key, modifiers);
 
     Assert.Equal(expected, shouldCommit);
   }

@@ -774,7 +774,7 @@ public sealed partial class FreeformScreenshotWindow : Window, IScreenshotFreefo
 
   private void AnnotationTextBox_KeyDown(object sender, WpfKeyEventArgs e)
   {
-    if (e.Key == Key.Enter)
+    if (ShouldCommitTextAnnotationKey(e.Key, Keyboard.Modifiers))
     {
       CommitTextAnnotation();
       e.Handled = true;
@@ -1012,6 +1012,11 @@ public sealed partial class FreeformScreenshotWindow : Window, IScreenshotFreefo
     return isTextBoxVisible &&
            activeTool == ScreenshotAnnotationTool.Text &&
            !isTextBoxClick;
+  }
+
+  internal static bool ShouldCommitTextAnnotationKey(Key key, ModifierKeys modifiers)
+  {
+    return key == Key.Enter && !modifiers.HasFlag(ModifierKeys.Shift);
   }
 
   private double GetEditScaleX()

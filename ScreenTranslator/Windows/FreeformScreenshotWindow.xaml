@@ -126,7 +126,8 @@
                  Foreground="White"
                  Padding="4,2"
                  Visibility="Collapsed"
-                 AcceptsReturn="False"
+                 AcceptsReturn="True"
+                 TextWrapping="Wrap"
                  KeyDown="AnnotationTextBox_KeyDown"
                  LostFocus="AnnotationTextBox_LostFocus" />
       </Canvas>

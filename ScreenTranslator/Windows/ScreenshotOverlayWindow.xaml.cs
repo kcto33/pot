@@ -315,6 +315,11 @@ public sealed partial class ScreenshotOverlayWindow : Window, IScreenshotOverlay
            !isTextBoxClick;
   }
 
+  internal static bool ShouldCommitTextAnnotationKey(Key key, ModifierKeys modifiers)
+  {
+    return key == Key.Enter && !modifiers.HasFlag(ModifierKeys.Shift);
+  }
+
   private static BitmapSource ConvertToBitmapSource(System.Drawing.Bitmap bitmap)
   {
     const double ScreenCaptureDpi = 96.0;
@@ -1163,7 +1168,7 @@ public sealed partial class ScreenshotOverlayWindow : Window, IScreenshotOverlay
 
   private void AnnotationTextBox_KeyDown(object sender, WpfKeyEventArgs e)
   {
-    if (e.Key == Key.Enter)
+    if (ShouldCommitTextAnnotationKey(e.Key, Keyboard.Modifiers))
     {
       CommitTextAnnotation();
       e.Handled = true;
