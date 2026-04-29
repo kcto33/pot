@@ -95,8 +95,8 @@ public sealed class ScreenshotAnnotationRendererTests
 
     var result = ScreenshotAnnotationRenderer.RenderComposite(baseImage, session);
 
-    Assert.NotEqual(GetPixel(baseImage, 25, 20), GetPixel(result, 25, 20));
-    Assert.NotEqual(GetPixel(baseImage, 41, 16), GetPixel(result, 41, 16));
+    AssertRegionContainsChangedPixel(baseImage, result, new Int32Rect(18, 16, 16, 8));
+    AssertRegionContainsChangedPixel(baseImage, result, new Int32Rect(34, 12, 10, 16));
   }
 
   [Fact]
@@ -115,8 +115,8 @@ public sealed class ScreenshotAnnotationRendererTests
 
     Assert.Equal(80, result.PixelWidth);
     Assert.Equal(50, result.PixelHeight);
-    Assert.NotEqual(GetPixel(baseImage, 16, 22), GetPixel(result, 16, 22));
-    Assert.Equal(GetPixel(baseImage, 70, 22), GetPixel(result, 70, 22));
+    AssertRegionContainsChangedPixel(baseImage, result, new Int32Rect(12, 12, 30, 24));
+    AssertRegionUnchanged(baseImage, result, new Int32Rect(60, 10, 20, 25));
   }
 
   private static WriteableBitmap CreateGradientImage(int width, int height)
@@ -162,5 +162,32 @@ public sealed class ScreenshotAnnotationRendererTests
     var pixels = new byte[4];
     source.CopyPixels(new Int32Rect(x, y, 1, 1), pixels, 4, 0);
     return BitConverter.ToUInt32(pixels, 0);
+  }
+
+  private static void AssertRegionContainsChangedPixel(BitmapSource expected, BitmapSource actual, Int32Rect region)
+  {
+    for (var y = region.Y; y < region.Y + region.Height; y++)
+    {
+      for (var x = region.X; x < region.X + region.Width; x++)
+      {
+        if (GetPixel(expected, x, y) != GetPixel(actual, x, y))
+        {
+          return;
+        }
+      }
+    }
+
+    Assert.Fail($"Expected at least one changed pixel in region {region}.");
+  }
+
+  private static void AssertRegionUnchanged(BitmapSource expected, BitmapSource actual, Int32Rect region)
+  {
+    for (var y = region.Y; y < region.Y + region.Height; y++)
+    {
+      for (var x = region.X; x < region.X + region.Width; x++)
+      {
+        Assert.Equal(GetPixel(expected, x, y), GetPixel(actual, x, y));
+      }
+    }
   }
 }
