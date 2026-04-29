@@ -99,6 +99,26 @@ public sealed class ScreenshotAnnotationRendererTests
     Assert.NotEqual(GetPixel(baseImage, 41, 16), GetPixel(result, 41, 16));
   }
 
+  [Fact]
+  public void RenderComposite_Draws_Text_And_Clips_To_Mask()
+  {
+    var baseImage = CreateSolidImage(80, 50, Colors.Navy);
+    var session = new ScreenshotAnnotationSession(
+      new Size(80, 50),
+      new RectangleGeometry(new Rect(10, 10, 50, 25)));
+
+    session.SetActiveTool(ScreenshotAnnotationTool.Text);
+    session.CommitText(new Point(12, 12), "Hi", Colors.White, fontSize: 22);
+    session.CommitText(new Point(65, 12), "X", Colors.Red, fontSize: 22);
+
+    var result = ScreenshotAnnotationRenderer.RenderComposite(baseImage, session);
+
+    Assert.Equal(80, result.PixelWidth);
+    Assert.Equal(50, result.PixelHeight);
+    Assert.NotEqual(GetPixel(baseImage, 16, 22), GetPixel(result, 16, 22));
+    Assert.Equal(GetPixel(baseImage, 70, 22), GetPixel(result, 70, 22));
+  }
+
   private static WriteableBitmap CreateGradientImage(int width, int height)
   {
     var bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgra32, null);
